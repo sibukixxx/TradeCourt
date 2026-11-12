@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useRef, useState } from 'preact/hooks'
 import {
   aiProviders,
   buildReviewPrompt,
@@ -62,7 +62,7 @@ export function CourtPanel({ detail, loading, onSaved, onError, onNotice }: Prop
     }
   }
 
-  async function saveReview(event: FormEvent<HTMLFormElement>) {
+  async function saveReview(event: Event) {
     event.preventDefault()
     if (!selected || busy) return
     if (reviewText.trim().length < 10) { onError('AIの回答は10文字以上で貼り付けてください'); return }
@@ -108,7 +108,7 @@ export function CourtPanel({ detail, loading, onSaved, onError, onNotice }: Prop
               <textarea ref={promptRef} className="prompt-preview" readOnly value={prompt} rows={12} aria-label="生成したAI審査プロンプト" data-testid="prompt" />
               <h3 className="step">2. コピーして公式AIで質問</h3>
               <div className="prompt-controls">
-                <select aria-label="質問するAIサービス" value={provider} onChange={(e) => setProvider(e.target.value as ProviderKey)}>
+                <select aria-label="質問するAIサービス" value={provider} onChange={(e) => setProvider(e.currentTarget.value as ProviderKey)}>
                   {providerKeys.map((key) => <option key={key} value={key}>{aiProviders[key].label}</option>)}
                 </select>
                 <button className="primary" type="button" onClick={() => void copyPrompt()}>{copied === role ? 'コピー済み ✓' : 'プロンプトをコピー'}</button>
@@ -120,15 +120,15 @@ export function CourtPanel({ detail, loading, onSaved, onError, onNotice }: Prop
               <h3>3. 回答を手動で保存</h3>
               <form onSubmit={(e) => void saveReview(e)} aria-label="AI回答の保存">
                 <div className="form-grid two">
-                  <label>回答したAIサービス<select value={provider} onChange={(e) => { requestKey.current = null; setProvider(e.target.value as ProviderKey) }}>
+                  <label>回答したAIサービス<select value={provider} onChange={(e) => { requestKey.current = null; setProvider(e.currentTarget.value as ProviderKey) }}>
                     {providerKeys.map((key) => <option key={key} value={key}>{aiProviders[key].label}</option>)}
                   </select></label>
-                  <label>役割<select value={role} onChange={(e) => { requestKey.current = null; setRole(e.target.value as Role) }}>
+                  <label>役割<select value={role} onChange={(e) => { requestKey.current = null; setRole(e.currentTarget.value as Role) }}>
                     <option value="BULL">BULL / 賛成</option><option value="BEAR">BEAR / 反対</option>
                   </select></label>
                 </div>
-                <label>回答日時<input type="datetime-local" value={respondedAt} max={localDateTimeNow()} onChange={(e) => setRespondedAt(e.target.value)} /></label>
-                <label>AIの回答（貼り付け）<textarea name="review" required minLength={10} maxLength={20000} rows={8} placeholder="契約中のAIからの回答をコピーして貼り付ける..." value={reviewText} onChange={(e) => { requestKey.current = null; setReviewText(e.target.value) }} /></label>
+                <label>回答日時<input type="datetime-local" value={respondedAt} max={localDateTimeNow()} onInput={(e) => setRespondedAt(e.currentTarget.value)} /></label>
+                <label>AIの回答（貼り付け）<textarea name="review" required minLength={10} maxLength={20000} rows={8} placeholder="契約中のAIからの回答をコピーして貼り付ける..." value={reviewText} onInput={(e) => { requestKey.current = null; setReviewText(e.currentTarget.value) }} /></label>
                 <button className="primary full" disabled={busy} type="submit">{busy ? '保存中…' : '審査記録を保存'}</button>
               </form>
               <p className="muted small">貼り付けた回答は「AIの意見」であり、検証済みの市場データではありません。HTMLとしては表示しません。</p>

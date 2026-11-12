@@ -18,19 +18,33 @@ A local-first **trade-decision review workspace**. Record a hypothetical USD/JPY
 
 **Phone UI (≤760px):** bottom tab bar (safe-area aware), scenario picker on AI Court / Journal, tables shown as stacked cards, 44px touch targets, 16px inputs (no iOS zoom on focus), sticky success/error messages.
 
-## Quick start (Node 22+, pnpm via corepack)
+## Quick start (Node 22+, macOS / Linux)
 
 ```bash
-corepack enable
-corepack pnpm install --frozen-lockfile
-corepack pnpm db:migrate:local
-corepack pnpm dev
+make setup    # install locked dependencies + migrate the local SQLite (D1) database
+make start    # start API + Web in the background and wait until healthy
+make open     # open http://127.0.0.1:5173
+make stop     # stop everything
 ```
 
 - Web: http://127.0.0.1:5173 (Vite, proxies `/api` to the Worker)
-- API: http://127.0.0.1:8787/api/health (Wrangler local, D1 state in `apps/api/.wrangler/`, gitignored)
+- API: http://127.0.0.1:8787/api/health (Wrangler local, SQLite/D1 state in `apps/api/.wrangler/`, gitignored)
+- Run `make` to list every target. Without make: `corepack pnpm install --frozen-lockfile && corepack pnpm db:migrate:local && corepack pnpm dev`.
 
-## Commands
+## Make targets
+
+| Group | Targets |
+| --- | --- |
+| Setup | `make setup` (= `install` + `migrate`), `make install` (`--frozen-lockfile`), `make migrate` (local only) |
+| Run (foreground) | `make dev` (API + Web, Ctrl+C to stop), `make api`, `make web` |
+| Run (background) | `make start` (waits for both health checks; refuses if ports 8787/5173 are taken or the DB is not migrated), `make stop` (stops the whole process group, no leftover workerd/vite), `make restart`, `make status`, `make logs`, `make logs-follow`, `make open` |
+| Quality | `make test`, `make typecheck`, `make build`, `make check` (all three), `make smoke` (needs `make start`), `make e2e` (isolated temp DB), `make e2e-dev` (against the running app), `make verify` (setup + check + e2e) |
+| Local database | `make db-backup` → `backups/tradecourt-backup-<time>.sql`; `make db-restore FILE=backups/<file>.sql`; `make db-reset CONFIRM=yes` (deletes all local data). Restore and reset require the server to be stopped and always write a safety backup first. |
+| Cleanup | `make clean` (build output, test artifacts, log; keeps data, backups, node_modules) |
+
+Background state lives in `.run/` (PID + `dev.log`); backups in `backups/`. Both are gitignored because they can contain your personal trade journal. Background control is implemented in `scripts/devctl.mjs` (POSIX process groups; macOS / Linux).
+
+## pnpm scripts (used by the Makefile)
 
 | Command | Purpose |
 | --- | --- |
@@ -58,6 +72,9 @@ Latest run: 2026-11-12, Linux cloud container (Node v22.23.4, pnpm 10.23.0 via c
 | `pnpm test:e2e` isolated, 14 steps (previous 12 + 答え合わせ on desktop + phone 390×844 touch flow: bottom tab bar stays pinned, scenario picker, tap grading, sticky message, card tables, no horizontal overflow) | PASS 14/14 |
 | Same E2E against running `pnpm dev` (:5173/:8787, real local D1) | PASS 14/14 |
 | Grades and all data persist after stopping and restarting `pnpm dev` | PASS |
+| Make targets: `start`/`stop`/`restart`/`status`/`logs`, port-conflict and unmigrated-DB refusal, no leftover processes after `stop` | PASS |
+| `make db-backup` → `db-reset CONFIRM=yes` (empty) → `db-restore` returns identical counts (14 scenarios / 13 reviews / 5 graded / 7 datasets) | PASS |
+| `make verify` (setup + test + typecheck + build + isolated E2E 14/14) | PASS |
 | Logging into / sending prompts to real ChatGPT, Claude, Gemini, Grok | **NOT RUN** (intentionally manual; not automatable by policy) |
 | Real phone hardware (iOS Safari / Android Chrome) | **NOT RUN** (emulated 390×844 touch viewport in Chromium only) |
 | Owner's own workstation (macOS/Windows) fresh clone | **NOT RUN** here |

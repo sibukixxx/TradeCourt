@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'preact/hooks'
 import {
   calculatePaperRMultiple,
   comparePlanToOutcome,
@@ -54,7 +54,7 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
   const outcome = detail?.outcome
   const comparison = selected && outcome ? comparePlanToOutcome(selected, outcome.exitPrice) : null
 
-  async function saveOutcome(event: FormEvent<HTMLFormElement>) {
+  async function saveOutcome(event: Event) {
     event.preventDefault()
     if (!selected || busy) return
     if (!Number.isFinite(exitNum) || exitNum <= 0) { onError('正の仮想終了価格を入力してください'); return }
@@ -121,13 +121,13 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
             ) : (
               <form onSubmit={(e) => void saveOutcome(e)} aria-label="仮想結果の記録">
                 <h3>仮想取引の終了を記録</h3>
-                <label>仮想終了価格<input name="exitPrice" type="number" required step="any" min="0.001" placeholder="例: 151.400" value={exitPrice} onChange={(e) => setExitPrice(e.target.value)} /></label>
+                <label>仮想終了価格<input name="exitPrice" type="number" required step="any" min="0.001" placeholder="例: 151.400" value={exitPrice} onInput={(e) => setExitPrice(e.currentTarget.value)} /></label>
                 <div className="ratio-preview" data-testid="r-preview"><span>R倍率（プレビュー）</span><strong>{previewR === null ? '入力待ち' : signed(previewR) + 'R'}</strong></div>
-                <label>終了理由<select value={exitReason} onChange={(e) => setExitReason(e.target.value as ExitReason)}>
+                <label>終了理由<select value={exitReason} onChange={(e) => setExitReason(e.currentTarget.value as ExitReason)}>
                   {(Object.keys(exitReasonLabels) as ExitReason[]).map((k) => <option key={k} value={k}>{exitReasonLabels[k]}</option>)}
                 </select></label>
-                <label className="check"><input type="checkbox" checked={followedPlan} onChange={(e) => setFollowedPlan(e.target.checked)} />事前に決めたルール（損切り・利確・無効化）に従った</label>
-                <label>結果の振り返り<textarea name="note" rows={4} maxLength={2000} placeholder="事前ルールに従えたか、想定外は何か、AIの指摘は当たったか..." value={note} onChange={(e) => setNote(e.target.value)} /></label>
+                <label className="check"><input type="checkbox" checked={followedPlan} onChange={(e) => setFollowedPlan(e.currentTarget.checked)} />事前に決めたルール（損切り・利確・無効化）に従った</label>
+                <label>結果の振り返り<textarea name="note" rows={4} maxLength={2000} placeholder="事前ルールに従えたか、想定外は何か、AIの指摘は当たったか..." value={note} onInput={(e) => setNote(e.currentTarget.value)} /></label>
                 <button className="primary full" type="submit" disabled={busy}>{busy ? '保存中…' : '仮想結果を保存'}</button>
                 <p className="muted small">1シナリオにつき1回だけ保存できます（変更不可）。R倍率は値幅のみで算出します。</p>
               </form>

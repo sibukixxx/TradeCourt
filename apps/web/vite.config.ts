@@ -1,5 +1,4 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
 
 // Local only. Defaults follow the port contract (web 5173 -> API 8787). The isolated browser E2E
 // (scripts/e2e-browser.mjs) overrides both ports; any non-loopback API origin is refused.
@@ -9,8 +8,8 @@ if (!/^http:\/\/(?:127\.0\.0\.1|localhost):\d{1,5}$/.test(apiOrigin)) {
 }
 const port = Number(process.env.TRADECOURT_WEB_PORT ?? 5173)
 
+// JSX is compiled for Preact via tsconfig `jsxImportSource: "preact"` (no extra plugin needed).
 export default defineConfig({
-  plugins: [react()],
   server: {
     host: '127.0.0.1',
     port,

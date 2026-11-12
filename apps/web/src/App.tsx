@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import type { JournalResponse, Scenario, ScenarioDetail } from '@tradecourt/core'
 import { api } from './api'
 import { getError, price, timestamp } from './format'
@@ -160,7 +160,7 @@ export default function App() {
         {(page === 'court' || page === 'journal') && scenarios.length > 0 && (
           <label className="scenario-picker mobile-only">
             対象シナリオ
-            <select data-testid="mobile-scenario-picker" value={selectedId ?? ''} onChange={(e) => void openScenario(e.target.value, page)}>
+            <select data-testid="mobile-scenario-picker" value={selectedId ?? ''} onChange={(e) => void openScenario(e.currentTarget.value, page)}>
               {scenarios.map((s) => (
                 <option key={s.id} value={s.id}>{s.side} {s.timeframe} · {price(s.entry)}→{price(s.target)} · {timestamp(s.createdAt)}</option>
               ))}

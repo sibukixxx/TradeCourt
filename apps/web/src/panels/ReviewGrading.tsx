@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useState } from 'preact/hooks'
 import {
   providerLabels,
   suggestVerdict,
@@ -62,7 +62,7 @@ function GradeCard({ scenarioId, review, rMultiple, onSaved, onError, onNotice }
           </button>
         ))}
       </div>
-      <label className="grade-note">メモ（任意）<input maxLength={1000} placeholder="何が当たった／外れたか" value={note} onChange={(e) => setNote(e.target.value)} /></label>
+      <label className="grade-note">メモ（任意）<input maxLength={1000} placeholder="何が当たった／外れたか" value={note} onInput={(e) => setNote(e.currentTarget.value)} /></label>
       <div className="grade-footer">
         <span className="muted small">{review.grade ? `採点 ${timestamp(review.grade.gradedAt)}` : `提案は結果${signed(rMultiple)}Rからの自動推定です`}</span>
         <button type="button" className="primary" disabled={busy || !dirty} onClick={() => void save()}>
@@ -131,7 +131,7 @@ export function Scorecard({ scorecard }: { scorecard: ReviewScorecard }) {
             <td className="hide-sm">{c.hit}</td>
             <td className="hide-sm">{c.miss}</td>
             <td className="hide-sm">{c.unclear}</td>
-            <td><span className="rate-bar" style={{ '--rate': c.hitRate ?? 0 } as CSSProperties}>{pct(c.hitRate)}</span><span className="show-sm muted"> {c.hit}/{c.hit + c.miss}</span></td>
+            <td><span className="rate-bar" style={`--rate: ${c.hitRate ?? 0}`}>{pct(c.hitRate)}</span><span className="show-sm muted"> {c.hit}/{c.hit + c.miss}</span></td>
           </tr>
         ))}</tbody>
       </table></div>

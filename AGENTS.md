@@ -13,7 +13,7 @@ Build and verify a **local-first trading-decision review application**, not a si
 - No unnecessary infra (Containers, Queues, R2, cron jobs, paid market feeds) for MVP.
 
 ## Architecture
-- pnpm monorepo: `apps/web` React/Vite; `apps/api` Hono Cloudflare Worker and local D1; `packages/core` Zod schemas, deterministic R:R math and prompt generation.
+- pnpm monorepo: `apps/web` Preact/Vite (native `preact` + `preact/hooks`, no compat layer; use `onInput` for text inputs); `apps/api` Hono Cloudflare Worker and local D1; `packages/core` Zod schemas, deterministic R:R math and prompt generation.
 - API owns persistence; never let UI read/write D1 directly. Use typed DTOs and validated inputs.
 - D1 migrations are additive and versioned in `apps/api/migrations`. Local migrations first. Use parameterized queries.
 - Port contracts: web `127.0.0.1:5173`, Worker `127.0.0.1:8787`, Vite proxies `/api`.
@@ -27,6 +27,8 @@ Build and verify a **local-first trading-decision review application**, not a si
 3. `corepack pnpm dev`; GET `/api/health`, create & list a synthetic scenario, generate both prompts, paste and persist a review, record a paper outcome, reload and verify persistence.
 4. Check invalid stop/target, missing fields, missing ID, repeated outcome, and no external AI/broker call.
 5. Report PASS/FAIL/NOT RUN with exact commands, environment, and evidence; no assumed success.
+
+Shortcuts (macOS/Linux): `make verify` covers 1–2 plus the isolated browser E2E; `make start`, `make smoke`, `make e2e-dev`, `make stop` cover 3–4 against the running app. Run `make` for all targets.
 
 ## Change discipline
 - Read README, docs/ARCHITECTURE.md, docs/ROADMAP.md first.

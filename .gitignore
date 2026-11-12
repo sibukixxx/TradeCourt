@@ -20,3 +20,7 @@ test-results/
 *.db
 pnpm-debug.log
 tmp/
+
+# Local process state and database backups (may contain personal trade journals)
+.run/
+backups/

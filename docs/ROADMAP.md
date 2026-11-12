@@ -3,7 +3,7 @@
 ## P0 — local-first functional skeleton
 - [x] Repository instructions and pnpm workspace.
 - [x] Hono Worker routes for health, scenarios, reviews and manual paper outcomes.
-- [x] React/Vite workspace and human-in-the-loop AI workflow.
+- [x] Preact/Vite workspace (migrated from React: ~58% smaller JS bundle) and human-in-the-loop AI workflow.
 - [x] SQLite-backed local D1 migration.
 - [x] Actually execute install, migrations, tests, typecheck, build, API smoke and browser E2E (cloud Linux container, 2026-11-12; see README). Owner workstation run still pending.
 - [x] Generate and commit `pnpm-lock.yaml`; `pnpm install --frozen-lockfile` verified.
