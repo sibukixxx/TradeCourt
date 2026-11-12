@@ -7,6 +7,8 @@ import type {
   PaperOutcome,
   PaperOutcomeInput,
   PathCheckResponse,
+  Quote,
+  QuoteProvider,
   Review,
   ReviewGradeInput,
   ReviewInput,
@@ -52,7 +54,9 @@ async function request<T>(path: string, options: RequestInit & { idempotencyKey?
 export const newRequestKey = () => crypto.randomUUID()
 
 export const api = {
-  health: () => request<{ status: string; mode: string }>('/api/health'),
+  health: () => request<{ status: string; mode: string; quoteProvider?: QuoteProvider }>('/api/health'),
+  /** User-initiated only (現在値を取得). The local API fetches the reference quote. */
+  quote: () => request<{ quote: Quote }>('/api/quote/usdjpy'),
   list: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
   create: (input: ScenarioInput, idempotencyKey: string) => request<{ scenario: Scenario }>('/api/scenarios', {
     method: 'POST', body: JSON.stringify(input), idempotencyKey,

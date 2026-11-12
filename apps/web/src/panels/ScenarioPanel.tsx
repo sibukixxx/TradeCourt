@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { calculateRiskReward, draftLevels, scenarioInputSchema, targetForR, type LevelMethod, type MarketDataset, type MarketDatasetMeta, type Scenario } from '@tradecourt/core'
+import { calculateRiskReward, candleTime, draftLevels, scenarioInputSchema, targetForR, type LevelMethod, type MarketDataset, type MarketDatasetMeta, type QuoteProvider, type Scenario } from '@tradecourt/core'
 import { api, newRequestKey } from '../api'
 import { getError, price, timestamp } from '../format'
 import { PriceChart } from '../components/PriceChart'
@@ -20,6 +20,8 @@ const blankDraft: Draft = { timeframe: '4h', side: 'LONG', entry: '', stop: '', 
 const MAX_AS_OF_OPTIONS = 500
 
 type Props = {
+  /** 'off' hides the optional external quote button. */
+  quoteProvider: QuoteProvider
   scenarios: Scenario[]
   loading: boolean
   onCreated: (scenario: Scenario) => void
@@ -27,15 +29,49 @@ type Props = {
   onError: (message: string) => void
 }
 
-export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }: Props) {
+export function ScenarioPanel({ quoteProvider, scenarios, loading, onCreated, onOpen, onError }: Props) {
   const [draft, setDraft] = useState<Draft>(blankDraft)
   const [busy, setBusy] = useState(false)
   const requestKey = useRef<string | null>(null)
   const [datasets, setDatasets] = useState<MarketDatasetMeta[]>([])
   const [linked, setLinked] = useState<MarketDataset | null>(null)
+  // Entry default: last close of the imported CSV whose last candle is the most recent (no network).
+  const [latestClose, setLatestClose] = useState<{ price: number; date: string; source: string } | null>(null)
+  const [entrySource, setEntrySource] = useState('')
+  const [quoteBusy, setQuoteBusy] = useState(false)
   useEffect(() => {
-    api.datasets().then(({ datasets: list }) => setDatasets(list)).catch((e: unknown) => onError(getError(e)))
+    let current = true
+    api.datasets().then(async ({ datasets: list }) => {
+      if (!current) return
+      setDatasets(list)
+      const newest = [...list].sort((a, b) => candleTime(b.lastDate, b.tzOffset ?? '+00:00') - candleTime(a.lastDate, a.tzOffset ?? '+00:00'))[0]
+      if (!newest) return
+      const { dataset } = await api.dataset(newest.id)
+      if (!current) return
+      const last = dataset.candles[dataset.candles.length - 1]
+      setLatestClose({ price: last.close, date: last.date, source: dataset.sourceName })
+    }).catch((e: unknown) => current && onError(getError(e)))
+    return () => { current = false }
   }, [onError])
+  const csvSourceText = (c: { date: string; source: string }) => `初期値: 取込CSV「${c.source}」の ${c.date} 終値（現在値ではありません）`
+  useEffect(() => {
+    // Fill only an empty Entry; never overwrite what the user typed.
+    if (!latestClose) return
+    setDraft((old) => (old.entry === '' ? { ...old, entry: String(latestClose.price) } : old))
+    setEntrySource((old) => old || csvSourceText(latestClose))
+  }, [latestClose])
+
+  async function fetchCurrentPrice() {
+    setQuoteBusy(true)
+    try {
+      const { quote } = await api.quote()
+      patch('entry', String(quote.price))
+      setEntrySource(quote.provider === 'synthetic'
+        ? `${quote.source} ${quote.asOf}`
+        : `ECB参照レート ${quote.asOf}（1日1回公表・リアルタイムではありません／${quote.source}）`)
+    } catch (e) { onError(getError(e)) }
+    finally { setQuoteBusy(false) }
+  }
   useEffect(() => {
     let current = true
     if (!draft.datasetId) { setLinked(null); return }
@@ -78,6 +114,7 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
   function applyDraft() {
     if (!levelDraft) return
     requestKey.current = null
+    setEntrySource(`自動下書き: 仮説時点 ${levelDraft.facts.asOfDate} の終値（取込CSV・現在値ではありません）`)
     setDraft((old) => ({
       ...old,
       entry: String(levelDraft.entry),
@@ -107,7 +144,8 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
     try {
       const { scenario } = await api.create(parsed.data, requestKey.current)
       requestKey.current = null
-      setDraft(blankDraft)
+      setDraft({ ...blankDraft, entry: latestClose ? String(latestClose.price) : '' })
+      setEntrySource(latestClose ? csvSourceText(latestClose) : '')
       onCreated(scenario)
     } catch (e) { onError(getError(e)) }
     finally { setBusy(false) }
@@ -148,7 +186,7 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
             <>
               <div className="as-of-hint">
                 <span>仮説時点の足の終値（CSV）<strong data-testid="as-of-close">{price(asOfCandle.close)}</strong></span>
-                <button type="button" className="secondary" onClick={() => patch('entry', String(asOfCandle.close))}>Entryに使う</button>
+                <button type="button" className="secondary" onClick={() => { patch('entry', String(asOfCandle.close)); setEntrySource(`仮説時点 ${asOfCandle.date} の終値（取込CSV・現在値ではありません）`) }}>Entryに使う</button>
               </div>
               <div className="auto-draft" data-testid="auto-draft">
                 <div className="auto-draft-head">
@@ -186,9 +224,17 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
           )}
         </fieldset>
         <div className="form-grid price-grid">
-          <label>Entry / 仮説価格<input name="entry" type="number" inputMode="decimal" step="any" min="0.001" placeholder="150.200" required value={draft.entry} onInput={(e) => patch('entry', e.currentTarget.value)} /></label>
+          <label>Entry / 仮説価格<input name="entry" type="number" inputMode="decimal" step="any" min="0.001" placeholder="150.200" required value={draft.entry} onInput={(e) => { setEntrySource(''); patch('entry', e.currentTarget.value) }} /></label>
           <label>Stop / 損切り<input name="stop" type="number" inputMode="decimal" step="any" min="0.001" placeholder="149.600" required value={draft.stop} onInput={(e) => patch('stop', e.currentTarget.value)} /></label>
           <label>Target / 利確<input name="target" type="number" inputMode="decimal" step="any" min="0.001" placeholder="151.400" required value={draft.target} onInput={(e) => patch('target', e.currentTarget.value)} /></label>
+        </div>
+        <div className="entry-source">
+          <span data-testid="entry-source">{entrySource || 'Entryは手入力、またはCSVに紐付けて「Entryに使う」'}</span>
+          {quoteProvider !== 'off' && (
+            <button type="button" className="secondary" data-testid="fetch-quote" disabled={quoteBusy} onClick={() => void fetchCurrentPrice()}>
+              {quoteBusy ? '取得中…' : quoteProvider === 'synthetic' ? '現在値を取得（テスト用）' : '現在値を取得（外部・ECB日次）'}
+            </button>
+          )}
         </div>
         <div className={'ratio-preview' + (directionIssue ? ' invalid' : '')} data-testid="rr-preview" aria-live="polite">
           <span>想定リスクリワード</span>

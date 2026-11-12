@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
-import type { JournalResponse, Scenario, ScenarioDetail } from '@tradecourt/core'
+import type { JournalResponse, QuoteProvider, Scenario, ScenarioDetail } from '@tradecourt/core'
 import { api } from './api'
 import { getError, price, timestamp } from './format'
 import { MarketPanel } from './panels/MarketPanel'
@@ -38,6 +38,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [ready, setReady] = useState<boolean | null>(null)
+  const [quoteProvider, setQuoteProvider] = useState<QuoteProvider>('off')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -73,6 +74,7 @@ export default function App() {
         })
         if (!mounted) return
         setReady(health.status === 'ok')
+        setQuoteProvider(health.quoteProvider ?? 'off')
         const list = await refreshLists()
         if (!mounted) return
         const id = initial.id && list.some((s) => s.id === initial.id) ? initial.id : list[0]?.id ?? null
@@ -174,6 +176,7 @@ export default function App() {
         {page === 'insights' && <InsightsPanel onError={showError} />}
         {page === 'scenario' && (
           <ScenarioPanel
+            quoteProvider={quoteProvider}
             scenarios={scenarios}
             loading={loading}
             onError={showError}
