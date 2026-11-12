@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   MAX_CSV_BYTES,
+  commonTzOffsets,
   parseOhlcCsv,
   summarizeCandles,
   type Candle,
@@ -8,27 +9,11 @@ import {
   type MarketDatasetMeta,
 } from '@tradecourt/core'
 import { api, newRequestKey } from '../api'
-import { chartPoints } from '../market'
+import { PriceChart } from '../components/PriceChart'
 import { getError, price, signed, timestamp } from '../format'
 
 type Timeframe = '1h' | '4h' | '1d'
 type Preview = { fileName: string; candles: Candle[] }
-
-function MarketChart({ candles }: { candles: Candle[] }) {
-  const closes = candles.map((c) => c.close)
-  const max = Math.max(...closes)
-  const min = Math.min(...closes)
-  return (
-    <div className="chart-wrap">
-      <div className="chart-axis"><span>{price(max)}</span><span>終値（CSV）</span></div>
-      <svg viewBox="0 0 640 200" preserveAspectRatio="none" role="img" aria-label="インポートしたCSVの終値推移" data-testid="close-chart">
-        <line vector-effect="non-scaling-stroke" x1="0" y1="100" x2="640" y2="100" className="chart-grid" />
-        <polyline vector-effect="non-scaling-stroke" points={chartPoints(candles)} fill="none" stroke="#6bceb6" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
-      </svg>
-      <div className="chart-axis"><span>{price(min)}</span><span>{candles[0].date} → {candles[candles.length - 1].date}</span></div>
-    </div>
-  )
-}
 
 function Stats({ candles }: { candles: Candle[] }) {
   const s = summarizeCandles(candles)
@@ -48,6 +33,8 @@ export function MarketPanel() {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [timeframe, setTimeframe] = useState<Timeframe>('1d')
   const [sourceNote, setSourceNote] = useState('')
+  // '' = not chosen yet (required), 'unknown' = user does not know (computed as UTC, flagged).
+  const [tz, setTz] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -88,11 +75,13 @@ export function MarketPanel() {
 
   async function save() {
     if (!preview) return
+    if (!tz) { setError('CSVの時刻のタイムゾーンを選択してください（不明なら「不明」）'); return }
     setBusy(true); setError('')
     requestKey.current ??= newRequestKey()
     try {
       const { dataset } = await api.importDataset({
         symbol: 'USDJPY', timeframe, sourceName: preview.fileName, sourceNote, candles: preview.candles,
+        ...(tz !== 'unknown' ? { tzOffset: tz } : {}),
       }, requestKey.current)
       setActive(dataset)
       setDatasets((list) => [dataset, ...list.filter((d) => d.id !== dataset.id)])
@@ -131,6 +120,11 @@ export function MarketPanel() {
           <label>時間足<select value={timeframe} onChange={(e) => setTimeframe(e.currentTarget.value as Timeframe)}>
             <option value="1h">1時間</option><option value="4h">4時間</option><option value="1d">日足</option>
           </select></label>
+          <label>CSV時刻のタイムゾーン（必須）<select data-testid="tz-select" value={tz} onChange={(e) => setTz(e.currentTarget.value)}>
+            <option value="">選択してください</option>
+            {commonTzOffsets.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <option value="unknown">不明（UTCとして扱い、未検証と表示）</option>
+          </select></label>
           <label>出典メモ（任意）<input maxLength={500} placeholder="例: 証券会社エクスポート / 合成データ" value={sourceNote} onInput={(e) => setSourceNote(e.currentTarget.value)} /></label>
         </div>
       </div>
@@ -143,7 +137,7 @@ export function MarketPanel() {
             <button className="primary" type="button" disabled={busy} onClick={() => void save()}>{busy ? '保存中…' : 'ローカルD1に保存'}</button>
           </div>
           <Stats candles={preview.candles} />
-          <MarketChart candles={preview.candles} />
+          <PriceChart candles={preview.candles} label="終値（CSV）" />
         </div>
       )}
 
@@ -151,10 +145,11 @@ export function MarketPanel() {
         : active && !preview ? (
           <div className="market-data" data-testid="active-dataset">
             <Stats candles={active.candles} />
-            <MarketChart candles={active.candles} />
+            <PriceChart candles={active.candles} label="終値（CSV）" />
             <dl className="provenance">
               <div><dt>出典</dt><dd data-testid="dataset-source">手動インポート「{active.sourceName}」{active.sourceNote && ` — ${active.sourceNote}`}</dd></div>
-              <div><dt>期間</dt><dd>{active.firstDate} → {active.lastDate}（{active.timeframe} / {active.candleCount}本 / タイムゾーンはCSV記載どおり・未検証）</dd></div>
+              <div><dt>期間</dt><dd>{active.firstDate} → {active.lastDate}（{active.timeframe} / {active.candleCount}本）</dd></div>
+              <div><dt>時刻</dt><dd data-testid="dataset-tz">{active.tzOffset ? `UTC${active.tzOffset}（取込時に指定・各足の始値時刻）` : '未指定（UTCとして計算・未検証）'}</dd></div>
               <div><dt>取込日時</dt><dd>{timestamp(active.importedAt)}</dd></div>
             </dl>
             <p className="muted small">価格の真偽・時刻・欠損は検証していません。これは現在値ではなく、ユーザーが用意したCSVの内容です。</p>
@@ -166,12 +161,13 @@ export function MarketPanel() {
       {datasets.length > 1 && (
         <div className="dataset-list">
           <h3>取込履歴</h3>
-          <div className="table-wrap"><table>
-            <thead><tr><th>出典</th><th>時間足</th><th>期間</th><th>本数</th><th>取込</th></tr></thead>
+          <div className="table-wrap"><table className="responsive" data-testid="dataset-table">
+            <thead><tr><th>出典</th><th>時間足</th><th>期間</th><th>TZ</th><th>本数</th><th>取込</th></tr></thead>
             <tbody>{datasets.map((d) => (
               <tr key={d.id} className={active?.id === d.id ? 'selected' : ''} onClick={() => void open(d.id)}>
-                <td><button className="link-button" type="button">{d.sourceName}</button></td><td>{d.timeframe}</td>
-                <td>{d.firstDate} → {d.lastDate}</td><td>{d.candleCount}</td><td>{timestamp(d.importedAt)}</td>
+                <td data-label="出典"><button className="link-button" type="button">{d.sourceName}</button></td><td data-label="時間足">{d.timeframe}</td>
+                <td data-label="期間">{d.firstDate} → {d.lastDate}</td><td data-label="TZ">{d.tzOffset ? `UTC${d.tzOffset}` : '未指定'}</td>
+                <td data-label="本数">{d.candleCount}</td><td data-label="取込">{timestamp(d.importedAt)}</td>
               </tr>
             ))}</tbody>
           </table></div>

@@ -6,13 +6,15 @@ import { MarketPanel } from './panels/MarketPanel'
 import { ScenarioPanel } from './panels/ScenarioPanel'
 import { CourtPanel } from './panels/CourtPanel'
 import { JournalPanel } from './panels/JournalPanel'
+import { InsightsPanel } from './panels/InsightsPanel'
 
-type Page = 'market' | 'scenario' | 'court' | 'journal'
+type Page = 'market' | 'scenario' | 'court' | 'journal' | 'insights'
 const pages: { id: Page; label: string }[] = [
   { id: 'market', label: 'Market Lens' },
   { id: 'scenario', label: 'Scenario' },
   { id: 'court', label: 'AI Court' },
   { id: 'journal', label: 'Journal' },
+  { id: 'insights', label: 'Insights' },
 ]
 
 // Route state lives in the URL hash (#/court/<scenarioId>) so a reload restores the same view.
@@ -169,6 +171,7 @@ export default function App() {
         )}
 
         {page === 'market' && <MarketPanel />}
+        {page === 'insights' && <InsightsPanel onError={showError} />}
         {page === 'scenario' && (
           <ScenarioPanel
             scenarios={scenarios}

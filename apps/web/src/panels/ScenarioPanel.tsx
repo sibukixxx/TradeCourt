@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'preact/hooks'
-import { calculateRiskReward, scenarioInputSchema, type Scenario } from '@tradecourt/core'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { calculateRiskReward, scenarioInputSchema, type MarketDataset, type MarketDatasetMeta, type Scenario } from '@tradecourt/core'
 import { api, newRequestKey } from '../api'
 import { getError, price, timestamp } from '../format'
+import { PriceChart } from '../components/PriceChart'
 
 type Draft = {
   timeframe: '1h' | '4h' | '1d'
@@ -11,8 +12,12 @@ type Draft = {
   target: string
   thesis: string
   invalidation: string
+  /** Optional market link: '' = not linked. */
+  datasetId: string
+  asOfDate: string
 }
-const blankDraft: Draft = { timeframe: '4h', side: 'LONG', entry: '', stop: '', target: '', thesis: '', invalidation: '' }
+const blankDraft: Draft = { timeframe: '4h', side: 'LONG', entry: '', stop: '', target: '', thesis: '', invalidation: '', datasetId: '', asOfDate: '' }
+const MAX_AS_OF_OPTIONS = 500
 
 type Props = {
   scenarios: Scenario[]
@@ -26,13 +31,36 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
   const [draft, setDraft] = useState<Draft>(blankDraft)
   const [busy, setBusy] = useState(false)
   const requestKey = useRef<string | null>(null)
+  const [datasets, setDatasets] = useState<MarketDatasetMeta[]>([])
+  const [linked, setLinked] = useState<MarketDataset | null>(null)
+  useEffect(() => {
+    api.datasets().then(({ datasets: list }) => setDatasets(list)).catch((e: unknown) => onError(getError(e)))
+  }, [onError])
+  useEffect(() => {
+    let current = true
+    if (!draft.datasetId) { setLinked(null); return }
+    api.dataset(draft.datasetId).then(({ dataset }) => {
+      if (!current) return
+      setLinked(dataset)
+      // Default as-of: the latest candle of the chosen dataset.
+      setDraft((old) => (old.asOfDate ? old : { ...old, asOfDate: dataset.candles[dataset.candles.length - 1].date }))
+    }).catch((e: unknown) => current && onError(getError(e)))
+    return () => { current = false }
+  }, [draft.datasetId, onError])
+
   const parsed = useMemo(() => scenarioInputSchema.safeParse({
     symbol: 'USDJPY',
-    ...draft,
+    timeframe: draft.timeframe,
+    side: draft.side,
     entry: draft.entry === '' ? NaN : Number(draft.entry),
     stop: draft.stop === '' ? NaN : Number(draft.stop),
     target: draft.target === '' ? NaN : Number(draft.target),
+    thesis: draft.thesis,
+    invalidation: draft.invalidation,
+    ...(draft.datasetId && draft.asOfDate ? { marketRef: { datasetId: draft.datasetId, asOfDate: draft.asOfDate } } : {}),
   }), [draft])
+  const asOfIndex = linked ? linked.candles.findIndex((c) => c.date === draft.asOfDate) : -1
+  const asOfCandle = asOfIndex >= 0 && linked ? linked.candles[asOfIndex] : null
   // R:R preview depends only on the three prices and direction, not on the text fields.
   const nums = [draft.entry, draft.stop, draft.target].map((v) => (v === '' ? NaN : Number(v)))
   const [entry, stop, target] = nums
@@ -40,6 +68,7 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
   const directional = pricesValid && (draft.side === 'LONG' ? stop < entry && target > entry : target < entry && stop > entry)
   const ratio = directional ? calculateRiskReward({ entry, stop, target }) : null
   const directionIssue = pricesValid && !directional
+  const asOfOptions = linked ? linked.candles.slice(-MAX_AS_OF_OPTIONS).map((c) => c.date).reverse() : []
 
   function patch<K extends keyof Draft>(key: K, value: Draft[K]) {
     requestKey.current = null // a changed draft is a new submission
@@ -83,6 +112,36 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
             <label className={draft.side === 'SHORT' ? 'on short-side' : ''}><input type="radio" name="side" value="SHORT" checked={draft.side === 'SHORT'} onChange={() => patch('side', 'SHORT')} />SHORT / 売り</label>
           </fieldset>
         </div>
+        <fieldset className="market-link" data-testid="market-link">
+          <legend>相場データに紐付け（任意）</legend>
+          <div className="form-grid two">
+            <label>取込済みCSV<select name="datasetId" value={draft.datasetId} onChange={(e) => { patch('asOfDate', ''); patch('datasetId', e.currentTarget.value) }}>
+              <option value="">紐付けない</option>
+              {datasets.map((d) => <option key={d.id} value={d.id}>{d.sourceName} · {d.timeframe} · {d.firstDate}→{d.lastDate}</option>)}
+            </select></label>
+            <label>仮説時点（この足の終値時点）<select name="asOfDate" value={draft.asOfDate} disabled={!linked} onChange={(e) => patch('asOfDate', e.currentTarget.value)}>
+              {!linked && <option value="">—</option>}
+              {asOfOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select></label>
+          </div>
+          {datasets.length === 0 && <p className="muted small">Market LensでCSVを取り込むと、仮説を立てた時点の足に紐付けられます。後から取り込んだCSVで「損切りと利確のどちらに先に届いたか」を照合できます。</p>}
+          {linked && asOfCandle && (
+            <>
+              <div className="as-of-hint">
+                <span>仮説時点の足の終値（CSV）<strong data-testid="as-of-close">{price(asOfCandle.close)}</strong></span>
+                <button type="button" className="secondary" onClick={() => patch('entry', String(asOfCandle.close))}>Entryに使う</button>
+              </div>
+              <PriceChart
+                candles={linked.candles.slice(Math.max(0, asOfIndex - 59), asOfIndex + 1)}
+                label="仮説時点までの終値（CSV）"
+                levels={directional ? { entry, stop, target } : undefined}
+                testId="link-chart"
+              ranges
+              />
+              <p className="muted small">紐付けは保存後に変更できません。仮説時点より後の足は、照合（Journal）でのみ使います。</p>
+            </>
+          )}
+        </fieldset>
         <div className="form-grid price-grid">
           <label>Entry / 仮説価格<input name="entry" type="number" inputMode="decimal" step="any" min="0.001" placeholder="150.200" required value={draft.entry} onInput={(e) => patch('entry', e.currentTarget.value)} /></label>
           <label>Stop / 損切り<input name="stop" type="number" inputMode="decimal" step="any" min="0.001" placeholder="149.600" required value={draft.stop} onInput={(e) => patch('stop', e.currentTarget.value)} /></label>

@@ -97,3 +97,16 @@ export function summarizeReviewGrades(rows: ReviewScoreRow[]): ReviewScorecard {
     lossesWarnedByBear: warnedLosses.size,
   }
 }
+
+/**
+ * Alternative suggestion from the reference CSV path check: target first => BULL argument held,
+ * stop first => BEAR argument held. null when the path cannot decide (open / ambiguous / no data).
+ */
+export function suggestVerdictFromPath(
+  role: GradeRole,
+  pathOutcome: 'TARGET_FIRST' | 'STOP_FIRST' | 'AMBIGUOUS' | 'OPEN' | 'NO_DATA',
+): Verdict | null {
+  if (pathOutcome === 'TARGET_FIRST') return role === 'BULL' ? 'HIT' : 'MISS'
+  if (pathOutcome === 'STOP_FIRST') return role === 'BEAR' ? 'HIT' : 'MISS'
+  return null
+}

@@ -9,7 +9,7 @@
 // Every non-loopback request is blocked and recorded; the run FAILS if any is attempted.
 // External AI sites are never opened, logged into or automated: only link attributes are checked.
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
@@ -148,6 +148,10 @@ async function main() {
     await step('2b. Market: valid synthetic OHLC CSV imports with chart, high/low/change and provenance', async () => {
       await page.getByTestId('csv-input').setInputFiles({ name: 'synthetic-usdjpy.csv', mimeType: 'text/csv', buffer: Buffer.from(validCsv) })
       await page.getByTestId('csv-preview').waitFor()
+      // Timezone of the CSV timestamps is a required, explicit choice.
+      await page.getByRole('button', { name: 'ローカルD1に保存' }).click()
+      await page.getByRole('alert').getByText(/タイムゾーンを選択/).waitFor()
+      await page.getByTestId('tz-select').selectOption('+09:00')
       await page.getByRole('button', { name: 'ローカルD1に保存' }).click()
       const active = page.getByTestId('active-dataset')
       await active.waitFor()
@@ -155,6 +159,7 @@ async function main() {
       assert.equal(await active.getByTestId('stat-low').innerText(), '149.500')
       assert.equal(await active.getByTestId('stat-change').innerText(), '-0.07%')
       assert.match(await active.getByTestId('dataset-source').innerText(), /synthetic-usdjpy\.csv/)
+      assert.match(await active.getByTestId('dataset-tz').innerText(), /UTC\+09:00/)
       assert.equal(await active.getByTestId('close-chart').locator('polyline').count(), 1)
       assert.match(await page.locator('.panel').innerText(), /2026-01-05 → 2026-01-08/)
       await shot('01-market')
@@ -329,18 +334,139 @@ async function main() {
       assert.match(await page.getByTestId('dataset-source').innerText(), /synthetic-usdjpy\.csv/)
     })
 
-    await step('Mobile (390x844): all four screens render without horizontal overflow', async () => {
+    await step('16-17. Link a scenario to an imported candle, then check which level the CSV touched first', async () => {
+      // Unlinked scenarios explain why no path check is possible.
+      await page.goto(`${base}/#/journal/${scenarioId}`)
+      await page.reload()
+      await page.getByTestId('path-check-unlinked').waitFor()
+
+      await nav('Scenario')
+      const form = page.getByRole('form', { name: 'シナリオ登録' })
+      const datasets = (await apiJson('/api/market/datasets')).body.datasets
+      const ds = datasets.find((d) => d.sourceName === 'synthetic-usdjpy.csv')
+      await form.locator('select[name=datasetId]').selectOption(ds.id)
+      await form.locator('select[name=asOfDate]').selectOption('2026-01-06')
+      assert.equal(await page.getByTestId('as-of-close').innerText(), '151.000')
+      await form.getByRole('button', { name: 'Entryに使う' }).click()
+      assert.equal(await form.locator('input[name=entry]').inputValue(), '151')
+      await form.locator('input[name=stop]').fill('149.6')
+      await form.locator('input[name=target]').fill('152.4')
+      await page.getByTestId('rr-preview').getByText('1 : 1.00').waitFor()
+      assert.equal(await page.getByTestId('link-chart').locator('line.level').count(), 3)
+      await form.locator('textarea[name=thesis]').fill('Synthetic E2E linked thesis: hypothetical breakout after 2026-01-06')
+      await form.locator('textarea[name=invalidation]').fill('Synthetic close below 149.6')
+      await form.getByRole('button', { name: /Save/ }).click()
+      await page.getByRole('status').getByText('シナリオを保存しました').waitFor()
+      await page.getByTestId('court-as-of').getByText(/2026-01-06/).waitFor()
+      assert.match(await page.getByTestId('prompt').inputValue(), /仮説時点: 2026-01-06/)
+      const linkedId = page.url().split('/').pop()
+      const detail = (await apiJson(`/api/scenarios/${linkedId}`)).body
+      // 2026-01-06 00:00 JST + 1 day = 2026-01-06T15:00Z (as-of close).
+      assert.deepEqual(detail.scenario.marketRef, { datasetId: ds.id, asOfDate: '2026-01-06', asOfAt: '2026-01-06T15:00:00.000Z' })
+
+      await nav('Journal')
+      const result = page.getByTestId('path-result')
+      await result.waitFor()
+      // Next candle 2026-01-07 has low 149.5 <= stop 149.6 and high 151.1 < target 152.4.
+      assert.equal(await result.getByTestId('path-outcome').innerText(), '損切りに先に到達')
+      assert.equal(await result.getByTestId('path-r').innerText(), '-1.00R')
+      assert.match(await result.innerText(), /判定足 2026-01-07（1本目）/)
+      const chart = page.getByTestId('path-chart')
+      assert.equal(await chart.locator('line.level').count(), 3)
+      assert.equal(await chart.getByTestId('as-of-marker').count(), 1)
+      assert.equal(await chart.getByTestId('decided-marker').count(), 1)
+      // Each candle's high-low range is drawn, so the 149.5 low that touched the stop is visible.
+      assert.equal(await chart.locator('line.range').count(), 4)
+      // Record a paper exit that contradicts the CSV path: exitReason TARGET at 150.5.
+      const outcomeForm = page.getByRole('form', { name: '仮想結果の記録' })
+      await outcomeForm.locator('input[name=exitPrice]').fill('150.5')
+      await outcomeForm.getByRole('combobox', { name: '終了理由' }).selectOption('TARGET')
+      await outcomeForm.getByRole('button', { name: '仮想結果を保存' }).click()
+      const compare = page.getByTestId('path-compare')
+      await compare.waitFor()
+      assert.match(await compare.innerText(), /あなたの仮想結果\s*-0\.36R/)
+      assert.match(await compare.innerText(), /差\s*\+0\.64R/)
+      await compare.getByTestId('path-mismatch').waitFor()
+      await shot('05-path-check')
+      // Persisted link survives reload; the check is recomputed identically.
+      await page.reload()
+      assert.equal(await page.getByTestId('path-result').getByTestId('path-outcome').innerText(), '損切りに先に到達')
+    })
+
+    await step('18-19. Path-based grading suggestion, Insights aggregation and CSV/JSON export', async () => {
+      const post = (path, body) => apiJson(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const ds = (await apiJson('/api/market/datasets')).body.datasets.find((d) => d.sourceName === 'synthetic-usdjpy.csv')
+      // Synthetic: paper exit +0.14R (above entry) but the CSV hit the stop first; rule deviation.
+      const sc = (await post('/api/scenarios', { symbol: 'USDJPY', timeframe: '1d', side: 'LONG', entry: 151, stop: 149.6, target: 152.4, thesis: 'Synthetic E2E: paper result and CSV path disagree', invalidation: 'Synthetic only', marketRef: { datasetId: ds.id, asOfDate: '2026-01-06' } })).body.scenario
+      await post(`/api/scenarios/${sc.id}/reviews`, { provider: 'gemini', role: 'BULL', content: 'Synthetic BULL answer for the disagreement case' })
+      await post(`/api/scenarios/${sc.id}/paper-outcome`, { exitPrice: 151.2, exitReason: 'MANUAL', followedPlan: false })
+      await page.goto(`${base}/#/journal/${sc.id}`)
+      await page.reload()
+      await page.getByTestId('path-result').getByText('損切りに先に到達').waitFor()
+      const card = page.getByTestId('review-grading').getByRole('article', { name: /Gemini BULL/ })
+      const miss = card.getByRole('button', { name: /外れ/ })
+      await miss.getByText('値動きより').waitFor()
+      assert.equal(await miss.getAttribute('aria-pressed'), 'true', 'path-based suggestion should be preselected')
+      assert.match(await card.getByRole('button', { name: /的中/ }).innerText(), /結果より/)
+
+      await nav('Insights')
+      const ins = page.getByTestId('insights')
+      await ins.waitFor()
+      await page.getByTestId('equity-chart').waitFor()
+      if (isolated) {
+        // Closed: +2 (s1), +1 (fresh), -0.357 (linked), +0.143 (this one; deviated).
+        assert.equal(await page.getByTestId('ins-average').innerText(), '+0.70R')
+        assert.equal(await page.getByTestId('ins-winrate').innerText(), '75%')
+        assert.equal(await page.getByTestId('ins-drawdown').innerText(), '-0.36R')
+        assert.equal(await page.getByTestId('ins-gap').innerText(), '+0.89R')
+        assert.match(await page.getByTestId('ins-saved').innerText(), /2回[\s\S]*\+1\.79R 軽減/)
+        assert.match(await page.getByTestId('ins-plan-note').innerText(), /破った回は、守った回より平均 -0\.74R/)
+        await page.getByRole('button', { name: '直近10件' }).click()
+        await page.getByTestId('ins-average').getByText('+0.70R').waitFor()
+      }
+      await shot('06-insights')
+
+      const download = async (testId) => {
+        const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId(testId).click()])
+        return { name: dl.suggestedFilename(), bytes: readFileSync(await dl.path()) }
+      }
+      const csv = await download('export-csv')
+      assert.match(csv.name, /^tradecourt-export-.*\.csv$/)
+      assert.deepEqual([...csv.bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf])
+      const lines = csv.bytes.toString('utf8').slice(1).trim().split('\r\n')
+      assert.ok(lines[0].startsWith('scenario_id,created_at,symbol'))
+      if (isolated) assert.equal(lines.length, 1 + 4)
+      assert.ok(csv.bytes.toString('utf8').includes('paper (user-entered, not broker fills)'))
+      const json = JSON.parse((await download('export-json')).bytes.toString('utf8'))
+      assert.equal(json.kind, 'paper')
+      if (isolated) assert.equal(json.scenarios.length, 4)
+    })
+
+    await step('Mobile (390x844): all five screens render without horizontal overflow', async () => {
       const mctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
       const m = await mctx.newPage()
-      const headings = { market: /Market Lens/, scenario: /New Scenario/, court: /AI Court/, journal: /Journal/ }
+      // A second synthetic dataset makes Market Lens render its import-history table on the phone too.
+      await apiJson('/api/market/datasets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        symbol: 'USDJPY', timeframe: '4h', sourceName: 'synthetic-second-dataset-with-a-long-file-name.csv', tzOffset: '+00:00',
+        candles: [{ date: '2026-01-09 00:00', open: 150, high: 150.5, low: 149.8, close: 150.2 }, { date: '2026-01-09 04:00', open: 150.2, high: 150.6, low: 150, close: 150.4 }],
+      }) })
+      const headings = { market: /Market Lens/, scenario: /New Scenario/, court: /AI Court/, journal: /Journal/, insights: /Insights/ }
       for (const [i, route] of Object.keys(headings).entries()) {
         await m.goto(`${base}/#/${route}/${scenarioId}`)
         await m.reload() // fresh load per screen: hash-only goto is a same-document navigation
         await m.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
         await m.locator('.panel h2').filter({ hasText: headings[route] }).waitFor()
+        if (route === 'market') await m.getByTestId('dataset-table').waitFor()
         await m.waitForTimeout(200)
         const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
         assert.ok(overflow <= 0, `${route}: horizontal overflow ${overflow}px`)
+        // Tables must also stay inside their cards (clipped columns don't show up as page overflow).
+        const spill = await m.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.table-wrap')].map((w) => {
+          if (getComputedStyle(w).overflowX !== 'visible') return 0 // scrollable on purpose
+          const table = w.querySelector('table')
+          return table ? Math.round(table.getBoundingClientRect().right - w.getBoundingClientRect().right) : 0
+        })))
+        assert.ok(spill <= 1, `${route}: a table extends ${spill}px past its container`)
         await m.screenshot({ path: join(outDir, `mobile-0${i + 1}-${route}.png`), fullPage: true })
       }
       await mctx.close()

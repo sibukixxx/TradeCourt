@@ -2,6 +2,8 @@ import { useState } from 'preact/hooks'
 import {
   providerLabels,
   suggestVerdict,
+  suggestVerdictFromPath,
+  type PathOutcome,
   type Review,
   type ReviewScorecard,
   type ScenarioDetail,
@@ -21,14 +23,18 @@ type CardProps = {
   scenarioId: string
   review: Review
   rMultiple: number
+  /** Reference CSV path outcome for linked scenarios (null = unlinked or not loaded). */
+  pathOutcome: PathOutcome | null
   onSaved: () => Promise<void>
   onError: (message: string) => void
   onNotice: (message: string) => void
 }
 
-function GradeCard({ scenarioId, review, rMultiple, onSaved, onError, onNotice }: CardProps) {
-  const suggestion = suggestVerdict(review.role, rMultiple)
-  const [verdict, setVerdict] = useState<Verdict>(review.grade?.verdict ?? suggestion)
+function GradeCard({ scenarioId, review, rMultiple, pathOutcome, onSaved, onError, onNotice }: CardProps) {
+  const fromResult = suggestVerdict(review.role, rMultiple)
+  const fromPath = pathOutcome ? suggestVerdictFromPath(review.role, pathOutcome) : null
+  // The CSV path (what price did after the hypothesis) is preferred when it decided.
+  const [verdict, setVerdict] = useState<Verdict>(review.grade?.verdict ?? fromPath ?? fromResult)
   const [note, setNote] = useState(review.grade?.note ?? '')
   const [busy, setBusy] = useState(false)
   const dirty = !review.grade || review.grade.verdict !== verdict || review.grade.note !== note.trim()
@@ -58,13 +64,16 @@ function GradeCard({ scenarioId, review, rMultiple, onSaved, onError, onNotice }
       <div className="verdict-buttons" role="group" aria-label="判定">
         {verdictOrder.map((v) => (
           <button key={v} type="button" aria-pressed={verdict === v} className={'verdict-button ' + v.toLowerCase() + (verdict === v ? ' selected' : '')} onClick={() => setVerdict(v)}>
-            {verdictLabels[v]}{v === suggestion && <small>提案</small>}
+            {verdictLabels[v]}
+            {(v === fromResult || v === fromPath) && (
+              <small>{[v === fromPath ? '値動き' : null, v === fromResult ? '結果' : null].filter(Boolean).join('・')}より</small>
+            )}
           </button>
         ))}
       </div>
       <label className="grade-note">メモ（任意）<input maxLength={1000} placeholder="何が当たった／外れたか" value={note} onInput={(e) => setNote(e.currentTarget.value)} /></label>
       <div className="grade-footer">
-        <span className="muted small">{review.grade ? `採点 ${timestamp(review.grade.gradedAt)}` : `提案は結果${signed(rMultiple)}Rからの自動推定です`}</span>
+        <span className="muted small">{review.grade ? `採点 ${timestamp(review.grade.gradedAt)}` : `提案は仮想結果${signed(rMultiple)}R${fromPath ? '・取込CSVの値動き' : ''}からの自動推定です`}</span>
         <button type="button" className="primary" disabled={busy || !dirty} onClick={() => void save()}>
           {busy ? '保存中…' : review.grade ? (dirty ? '採点を更新' : '保存済み') : '採点を保存'}
         </button>
@@ -78,9 +87,10 @@ type GradingProps = {
   onSaved: () => Promise<void>
   onError: (message: string) => void
   onNotice: (message: string) => void
+  pathOutcome: PathOutcome | null
 }
 
-export function ReviewGrading({ detail, onSaved, onError, onNotice }: GradingProps) {
+export function ReviewGrading({ detail, pathOutcome, onSaved, onError, onNotice }: GradingProps) {
   const { reviews, outcome, scenario } = detail
   const graded = reviews.filter((r) => r.grade).length
   return (
@@ -95,10 +105,10 @@ export function ReviewGrading({ detail, onSaved, onError, onNotice }: GradingPro
         <p className="empty short" data-testid="grading-locked">仮想取引の結果を記録すると、各AIの指摘が当たったかを採点できます。</p>
       ) : (
         <>
-          <p className="muted small">結果を見たうえで、各AIの主張が当たったかを自分で判定します（提案: 利益ならBULL的中・損失ならBEAR的中）。これはあなたの主観的な評価で、市場による検証ではありません。採点は後から変更できます。</p>
+          <p className="muted small">結果を見たうえで、各AIの主張が当たったかを自分で判定します（提案:「結果より」は利益ならBULL的中・損失ならBEAR的中、「値動きより」は取込CSVで利確先行ならBULL的中・損切り先行ならBEAR的中。両方ある場合は値動きを優先して初期選択）。これはあなたの主観的な評価で、市場による検証ではありません。採点は後から変更できます。</p>
           <div className="grade-list">
             {reviews.map((r) => (
-              <GradeCard key={r.id + (r.grade?.gradedAt ?? '')} scenarioId={scenario.id} review={r} rMultiple={outcome.rMultiple} onSaved={onSaved} onError={onError} onNotice={onNotice} />
+              <GradeCard key={r.id + (r.grade?.gradedAt ?? '') + (pathOutcome ?? '')} scenarioId={scenario.id} review={r} rMultiple={outcome.rMultiple} pathOutcome={pathOutcome} onSaved={onSaved} onError={onError} onNotice={onNotice} />
             ))}
           </div>
         </>

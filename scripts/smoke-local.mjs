@@ -70,6 +70,26 @@ const { dataset } = await call('/api/market/datasets', {
   ],
 }, 201)
 check(dataset.verified === false && dataset.stats.high === 151.2, 'Market dataset stats wrong')
+// Root of the API port explains where the UI is.
+check((await call('/')).web === 'http://127.0.0.1:5173', 'Root guidance missing')
+// Link a scenario to the synthetic dataset's first candle and run the path check (reference only).
+const { scenario: linkedScenario } = await call('/api/scenarios', {
+  ...payload, entry: 150.5, stop: 149.9, target: 151.5, // next synthetic bar: high 151.2 / low 150.1 -> neither level
+  thesis: `Synthetic linked smoke ${now}`, marketRef: { datasetId: dataset.id, asOfDate: '2026-01-05' },
+}, 201)
+check(linkedScenario.marketRef?.asOfAt === '2026-01-06T00:00:00.000Z', 'as-of close not fixed')
+const pathCheck = await call(`/api/scenarios/${linkedScenario.id}/path-check?datasetId=${dataset.id}`)
+check(pathCheck.kind === 'reference' && pathCheck.evaluation.outcome === 'OPEN', `Unexpected path outcome ${pathCheck.evaluation?.outcome}`)
+await call(`/api/scenarios/${scenario.id}/path-check`, undefined, 409)
+// Decision analysis and exports (paper records only).
+const { analysis } = await call('/api/analysis?limit=20')
+check(analysis.window.requested === 20 && analysis.overview.count >= 1, 'Analysis missing closed records')
+await call('/api/analysis?limit=0', undefined, 400)
+const csvRes = await fetch(`${base}/api/export?format=csv`)
+const csvBytes = new Uint8Array(await csvRes.arrayBuffer())
+check(csvRes.ok && csvBytes[0] === 0xef && /^scenario_id,/.test(new TextDecoder().decode(csvBytes.slice(3))), 'CSV export malformed')
+const exported = await call('/api/export?format=json')
+check(exported.kind === 'paper' && exported.scenarios.some((x) => x.scenario.id === scenario.id), 'JSON export missing scenario')
 await call('/api/market/datasets', { symbol: 'USDJPY', timeframe: '1d', sourceName: 'x', candles: [] }, 400)
-console.log('PASS: TradeCourt local API CRUD / validation / paper outcome / grading / journal / market / idempotency. Scenario ID:', scenario.id)
+console.log('PASS: TradeCourt local API CRUD / validation / paper outcome / grading / journal / market / market link + path check / analysis / export / idempotency. Scenario ID:', scenario.id)
 console.log('NOTE: synthetic records persist in local D1; no browser UI was tested.')

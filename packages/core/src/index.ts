@@ -2,8 +2,11 @@ import { z } from 'zod'
 
 export * from './market'
 export * from './grading'
+export * from './path'
+export * from './analysis'
 
 import type { ReviewGrade, ReviewScorecard } from './grading'
+import { marketRefInputSchema, type MarketRef } from './path'
 
 const positivePrice = z.number().finite().positive()
 
@@ -16,6 +19,8 @@ export const scenarioInputSchema = z.object({
   target: positivePrice,
   thesis: z.string().trim().min(12).max(2000),
   invalidation: z.string().trim().min(5).max(1000),
+  /** Optional link to an imported CSV candle the hypothesis was formed at (immutable). */
+  marketRef: marketRefInputSchema.optional(),
 }).strict().superRefine((scenario, ctx) => {
   const correctDirection = scenario.side === 'LONG'
     ? scenario.stop < scenario.entry && scenario.target > scenario.entry
@@ -53,7 +58,11 @@ export type ScenarioInput = z.infer<typeof scenarioInputSchema>
 export type ReviewInput = z.infer<typeof reviewInputSchema>
 export type PaperOutcomeInput = z.input<typeof paperOutcomeInputSchema>
 
-export type Scenario = ScenarioInput & {
+/** Scenario fields without the market link (what prompts and R math need). */
+export type ScenarioCore = Omit<ScenarioInput, 'marketRef'>
+
+export type Scenario = ScenarioCore & {
+  marketRef: MarketRef | null
   id: string
   createdAt: string
   riskReward: number
@@ -200,7 +209,10 @@ export function summarizeJournal(entries: Pick<JournalEntry, 'outcome'>[]): Jour
   }
 }
 
-export function buildReviewPrompt(scenario: ScenarioInput, role: 'BULL' | 'BEAR'): string {
+export function buildReviewPrompt(
+  scenario: ScenarioCore & { marketRef?: Pick<MarketRef, 'asOfDate'> | null },
+  role: 'BULL' | 'BEAR',
+): string {
   const focus = role === 'BULL'
     ? 'このトレード案が合理的になる条件を示し、同時に最も強い反論も提示してください。'
     : 'このトレード案を採用しない理由を優先して探し、反証できる条件を提示してください。'
@@ -215,7 +227,7 @@ export function buildReviewPrompt(scenario: ScenarioInput, role: 'BULL' | 'BEAR'
 利確: ${scenario.target}
 リスクリワード: 1:${calculateRiskReward(scenario)}
 根拠: ${scenario.thesis}
-無効化条件: ${scenario.invalidation}
+無効化条件: ${scenario.invalidation}${scenario.marketRef ? `\n仮説時点: ${scenario.marketRef.asOfDate} の足の終値時点（ユーザーが取り込んだCSVに基づく。最新相場ではありません）` : ''}
 
 役割: ${role === 'BULL' ? '賛成側' : '反対側'}
 ${focus}

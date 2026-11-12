@@ -1,16 +1,21 @@
-import type { Candle } from '@tradecourt/core'
+// Pure chart geometry helpers. They only plot values supplied by the user's own CSV.
+export const CHART_W = 640
+export const CHART_H = 200
+const PAD = 10
 
-/** SVG polyline points for a close-price line chart. Pure; renders only the supplied candles. */
-export function chartPoints(candles: Candle[], width = 640, height = 200, pad = 10): string {
-  if (candles.length === 0) return ''
-  const closes = candles.map((c) => c.close)
-  const min = Math.min(...closes)
-  const max = Math.max(...closes)
+export function yScale(min: number, max: number, height = CHART_H) {
   const range = max - min || 1
-  const last = Math.max(candles.length - 1, 1)
-  return closes.map((value, i) => {
-    const x = pad + (i / last) * (width - pad * 2)
-    const y = pad + (1 - (value - min) / range) * (height - pad * 2)
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
+  return (value: number) => PAD + (1 - (value - min) / range) * (height - PAD * 2)
+}
+
+export function xScale(count: number, width = CHART_W) {
+  const last = Math.max(count - 1, 1)
+  return (i: number) => PAD + (i / last) * (width - PAD * 2)
+}
+
+/** SVG polyline points for a close-price line. */
+export function linePoints(values: number[], min: number, max: number): string {
+  const x = xScale(values.length)
+  const y = yScale(min, max)
+  return values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
 }

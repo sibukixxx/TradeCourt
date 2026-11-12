@@ -12,13 +12,17 @@
 - [x] Playwright browser E2E (`pnpm test:e2e`) on isolated temp D1.
 
 ## P1 — market evidence
-- [x] OHLC CSV import, source/schema validation and upload bounds (timezone is recorded as "as written in CSV", not yet selectable).
+- [x] OHLC CSV import, source/schema validation and upload bounds; explicit fixed-offset timezone per import.
+- [x] Link scenarios to an as-of candle; deterministic, look-ahead-free stop/target first-touch check against later imported candles (reference only).
 - [ ] Deterministic multi-timeframe trend / support/resistance, with parameterized rebounce definitions.
-- [ ] Immutable scenario and candle snapshot hashing; no look-ahead bias.
+- [ ] Candle snapshot hashing (look-ahead is already prevented by the as-of close rule).
+- [ ] DST-aware timezones (IANA zones) for CSV imports.
 - [x] Plan vs user-entered paper outcome comparison and basic journal summary (wins/losses, total/avg R, rule adherence).
 - [x] Review quality metrics: post-hoc grading of each AI review (的中/外れ/判定不能) and per AI × BULL/BEAR hit-rate scorecard.
 - [x] Phone UI: bottom tab bar, scenario picker, card tables, touch targets.
-- [ ] Data export / backup (JSON/CSV) of the local database.
+- [x] Data export (JSON/CSV) and SQL backup/restore (`make db-backup` / `db-restore`).
+- [x] Decision-habit analysis (Insights): rule adherence, exit reasons, plan vs CSV path gaps, cumulative paper R.
+- [ ] Strategy tags on scenarios for per-setup analysis.
 
 ## P2 — use outside localhost
 - [ ] Security review (auth, access, per-user isolation, CORS/CSRF and data retention).

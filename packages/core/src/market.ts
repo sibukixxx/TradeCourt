@@ -10,18 +10,40 @@ export const MAX_CSV_BYTES = 2 * 1024 * 1024
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/
 const NUMBER_PATTERN = /^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/
 
-/** Normalized epoch milliseconds for ordering. Values without an offset are compared as UTC. */
-export function candleTime(date: string): number {
-  if (!DATE_PATTERN.test(date)) return NaN
-  let iso = date.replace(' ', 'T')
-  if (iso.length > 10 && !/(?:Z|[+-]\d{2}:\d{2})$/.test(iso)) iso += 'Z'
-  const ms = Date.parse(iso)
+/** Fixed UTC offset of the CSV's local timestamps, e.g. "+09:00" (JST). DST zones are not modelled. */
+export const tzOffsetSchema = z.string().regex(/^[+-](?:0\d|1[0-4]):(?:00|30|45)$/, 'tzOffset must look like +09:00')
+export type TzOffset = z.infer<typeof tzOffsetSchema>
+export const commonTzOffsets: { value: TzOffset; label: string }[] = [
+  { value: '+00:00', label: 'UTC (+00:00)' },
+  { value: '+09:00', label: '日本時間 JST (+09:00)' },
+  { value: '+08:00', label: '+08:00 (SGT/HKT)' },
+  { value: '+03:00', label: '+03:00 (MT4/MT5 夏時間に多い)' },
+  { value: '+02:00', label: '+02:00 (MT4/MT5 冬時間に多い)' },
+  { value: '+01:00', label: '+01:00 (CET)' },
+  { value: '-04:00', label: '-04:00 (米国東部 夏時間)' },
+  { value: '-05:00', label: '-05:00 (米国東部 冬時間)' },
+]
+
+const EXPLICIT_OFFSET = /(?:Z|[+-]\d{2}:\d{2})$/
+
+function validCalendarDay(ymd: string): boolean {
+  const ms = Date.parse(`${ymd}T00:00:00Z`)
   // Date.parse rolls over impossible dates (2026-02-31). Reject them by round-tripping the day.
-  if (!Number.isFinite(ms)) return NaN
-  if (iso.length === 10 || iso.endsWith('Z')) {
-    if (new Date(ms).toISOString().slice(0, 10) !== iso.slice(0, 10)) return NaN
-  }
-  return ms
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === ymd
+}
+
+/**
+ * Absolute epoch milliseconds of a candle's timestamp (the bar's OPEN time).
+ * An explicit offset in the value wins; otherwise `tzOffset` (default UTC) is applied.
+ * Date-only values mean 00:00 of that day in the given offset.
+ */
+export function candleTime(date: string, tzOffset: string = '+00:00'): number {
+  if (!DATE_PATTERN.test(date) || !validCalendarDay(date.slice(0, 10))) return NaN
+  let iso = date.replace(' ', 'T')
+  if (iso.length === 10) iso += 'T00:00:00'
+  if (!EXPLICIT_OFFSET.test(iso)) iso += tzOffset
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? ms : NaN
 }
 
 const price = z.number().finite().positive()
@@ -55,6 +77,8 @@ export const marketDatasetInputSchema = z.object({
   timeframe: z.enum(['1h', '4h', '1d']),
   sourceName: z.string().trim().min(1).max(200),
   sourceNote: z.string().trim().max(500).default(''),
+  /** Offset of timestamps written without one. Omitted = unknown (computed as UTC, shown as unverified). */
+  tzOffset: tzOffsetSchema.optional(),
   candles: z.array(candleSchema).min(2).max(MAX_CANDLES),
 }).strict().superRefine((d, ctx) => {
   const bad = strictlyAscending(d.candles)
@@ -86,6 +110,8 @@ export type MarketDatasetMeta = {
   sourceName: string
   sourceNote: string
   candleCount: number
+  /** null = not specified at import (treated as UTC for calculations). */
+  tzOffset: string | null
   firstDate: string
   lastDate: string
   importedAt: string
