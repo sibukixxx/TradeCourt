@@ -28,6 +28,8 @@ User-initiated Copy -> official AI website -> user pastes answer -> TradeCourt
 | `PUT /api/scenarios/:id/reviews/:reviewId/grade` | Post-hoc grading: `verdict` (HIT/MISS/UNCLEAR), optional `note`. 409 until the scenario has a paper outcome; 404 if the review belongs to another scenario. Re-grading overwrites (the user's judgment), the paper outcome stays immutable. |
 | `GET /api/scenarios/:id/path-check[?datasetId=]` | Reference only, computed on demand (never stored): first touch of stop/target in an imported dataset after the as-of close. Default dataset = newest import with later candles. 409 if the scenario is not linked. |
 | `GET /` | Guidance: this port is the API; the UI is on :5173. |
+| `GET /api/analysis[?limit=N\|all]` | Decision-habit aggregates over paper outcomes (most recent N by record time) incl. comparison with the default reference path check. 400 for an invalid limit. |
+| `GET /api/export?format=json\|csv` | Download of all scenarios, reviews (with grades), paper outcomes, market links and default path references (no candles; use `make db-backup` for a full backup). CSV: UTF-8 BOM, RFC 4180 quoting, text cells starting with = + - @ prefixed with `'`. |
 | `GET /api/journal` | All scenarios with review/graded counts and paper outcomes + summary + `scorecard` (per AI × role hit rate, awaiting grade, losses warned by BEAR) (`kind: "paper"`). |
 | `GET/POST /api/market/datasets`, `GET /api/market/datasets/:id` | Imported OHLC snapshots (≤5,000 candles, ascending, consistent OHLC), served with computed stats and `verified: false`. |
 
@@ -57,6 +59,11 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 - The position is assumed open at Entry at the as-of candle CLOSE (open + timeframe). Only candles opening at/after that instant are used, so finer-timeframe data cannot leak the as-of candle's interior (no look-ahead).
 - LONG: stop if low ≤ stop, target if high ≥ target (mirrored for SHORT). Both in one candle → AMBIGUOUS, unless the candle opened beyond a level (gap), which decides it at the open; the open R is reported.
 - MFE/MAE use only candles before the deciding one. No spread, slippage, fees or swaps. DST-observing zones are not modelled (fixed offsets only).
+
+## Decision analysis (`packages/core/src/analysis.ts`)
+- Only closed (paper) scenarios count; the window is the most recent N by `recordedAt`.
+- Path comparison uses the same default dataset as the Journal (newest import with later candles): gap = paper R − reference R; within ±0.05R counts as matched; ambiguous / open / no-data / unlinked scenarios are excluded and counted separately.
+- Grading suggestions: "結果より" (paper R sign) and "値動きより" (path TARGET_FIRST → BULL hit, STOP_FIRST → BEAR hit); the path one is preselected when available. The user decides.
 
 ## Testing
 - `pnpm test`: core unit tests + API route tests on `apps/api/test/d1-sqlite.ts`, a tiny D1 shim over Node's built-in `node:sqlite` that applies the real migration files.

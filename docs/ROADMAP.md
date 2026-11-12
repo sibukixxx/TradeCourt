@@ -20,7 +20,9 @@
 - [x] Plan vs user-entered paper outcome comparison and basic journal summary (wins/losses, total/avg R, rule adherence).
 - [x] Review quality metrics: post-hoc grading of each AI review (的中/外れ/判定不能) and per AI × BULL/BEAR hit-rate scorecard.
 - [x] Phone UI: bottom tab bar, scenario picker, card tables, touch targets.
-- [ ] Data export / backup (JSON/CSV) of the local database.
+- [x] Data export (JSON/CSV) and SQL backup/restore (`make db-backup` / `db-restore`).
+- [x] Decision-habit analysis (Insights): rule adherence, exit reasons, plan vs CSV path gaps, cumulative paper R.
+- [ ] Strategy tags on scenarios for per-setup analysis.
 
 ## P2 — use outside localhost
 - [ ] Security review (auth, access, per-user isolation, CORS/CSRF and data retention).
