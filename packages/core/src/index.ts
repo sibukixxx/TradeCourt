@@ -1,6 +1,9 @@
 import { z } from 'zod'
 
 export * from './market'
+export * from './grading'
+
+import type { ReviewGrade, ReviewScorecard } from './grading'
 
 const positivePrice = z.number().finite().positive()
 
@@ -72,6 +75,8 @@ export type Review = {
   createdAt: string
   /** Reviews only ever enter TradeCourt by manual paste; never fetched from an AI service. */
   source: 'manual_paste'
+  /** Post-hoc user grade against the paper outcome; null until graded. */
+  grade: ReviewGrade | null
 }
 
 export type PaperOutcome = {
@@ -88,8 +93,15 @@ export type PaperOutcome = {
 
 export type JournalEntry = {
   scenario: Scenario
-  reviewCounts: { total: number; bull: number; bear: number; providers: Provider[] }
+  reviewCounts: { total: number; bull: number; bear: number; graded: number; providers: Provider[] }
   outcome: PaperOutcome | null
+}
+
+export type JournalResponse = {
+  entries: JournalEntry[]
+  summary: JournalSummary
+  scorecard: ReviewScorecard
+  kind: 'paper'
 }
 
 export type ScenarioDetail = {

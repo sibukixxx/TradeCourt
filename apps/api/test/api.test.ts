@@ -161,7 +161,7 @@ describe('paper outcome and journal', () => {
     expect(data.kind).toBe('paper')
     expect(data.entries).toHaveLength(2)
     const ea = data.entries.find((e: any) => e.scenario.id === a)
-    expect(ea.reviewCounts).toEqual({ total: 2, bull: 1, bear: 1, providers: ['claude', 'grok'] })
+    expect(ea.reviewCounts).toEqual({ total: 2, bull: 1, bear: 1, graded: 0, providers: ['claude', 'grok'] })
     expect(ea.outcome).toMatchObject({ rMultiple: 2, exitReason: 'TARGET', followedPlan: true })
     expect(data.entries.find((e: any) => e.scenario.id === b).outcome).toBeNull()
     expect(data.summary).toMatchObject({ scenarios: 2, closed: 1, open: 1, wins: 1, totalR: 2, averageR: 2 })
@@ -190,5 +190,77 @@ describe('market datasets', () => {
     expect((await call('/api/market/datasets', { body: { ...dataset, candles: [...candles].reverse() } })).status).toBe(400)
     expect((await call('/api/market/datasets', { body: { ...dataset, candles: [{ ...candles[0], low: 151 }, candles[1]] } })).status).toBe(400)
     expect((await call('/api/market/datasets', { body: { ...dataset, symbol: 'BTCUSD' } })).status).toBe(400)
+  })
+})
+
+describe('post-hoc review grading (答え合わせ)', () => {
+  async function setup() {
+    const id = (await createScenario()).data.scenario.id
+    const bull = (await call(`/api/scenarios/${id}/reviews`, { body: { provider: 'claude', role: 'BULL', content: 'Synthetic bull argument' } })).data.review
+    const bear = (await call(`/api/scenarios/${id}/reviews`, { body: { provider: 'chatgpt', role: 'BEAR', content: 'Synthetic bear argument' } })).data.review
+    return { id, bull, bear }
+  }
+  const grade = (id: string, reviewId: string, body: unknown) =>
+    call(`/api/scenarios/${id}/reviews/${reviewId}/grade`, { method: 'PUT', body })
+
+  it('new reviews start ungraded', async () => {
+    const { id } = await setup()
+    const detail = await call(`/api/scenarios/${id}`)
+    expect(detail.data.reviews.every((r: any) => r.grade === null)).toBe(true)
+  })
+
+  it('refuses grading before a paper outcome exists (409)', async () => {
+    const { id, bull } = await setup()
+    const res = await grade(id, bull.id, { verdict: 'HIT' })
+    expect(res.status).toBe(409)
+    expect((await call(`/api/scenarios/${id}`)).data.reviews.find((r: any) => r.id === bull.id).grade).toBeNull()
+  })
+
+  it('grades, persists, allows re-grading and reports a scorecard', async () => {
+    const { id, bull, bear } = await setup()
+    await call(`/api/scenarios/${id}/paper-outcome`, { body: { exitPrice: 149.6, exitReason: 'STOP' } }) // -1R loss
+    const g1 = await grade(id, bear.id, { verdict: 'HIT', note: 'Synthetic: the bear warning came true' })
+    expect(g1.status).toBe(200)
+    expect(g1.data.review.grade).toMatchObject({ verdict: 'HIT', note: 'Synthetic: the bear warning came true' })
+    await grade(id, bull.id, { verdict: 'HIT' })
+    const regrade = await grade(id, bull.id, { verdict: 'MISS' })
+    expect(regrade.data.review.grade.verdict).toBe('MISS')
+
+    const detail = await call(`/api/scenarios/${id}`)
+    const byId = Object.fromEntries(detail.data.reviews.map((r: any) => [r.id, r.grade?.verdict]))
+    expect(byId).toEqual({ [bull.id]: 'MISS', [bear.id]: 'HIT' })
+    // Outcome stays immutable regardless of grading.
+    expect(detail.data.outcome.rMultiple).toBe(-1)
+
+    const { data } = await call('/api/journal')
+    expect(data.entries[0].reviewCounts.graded).toBe(2)
+    expect(data.scorecard.overall).toMatchObject({ reviews: 2, graded: 2, hit: 1, miss: 1, hitRate: 0.5 })
+    expect(data.scorecard.cells).toEqual([
+      { provider: 'chatgpt', role: 'BEAR', reviews: 1, graded: 1, hit: 1, miss: 0, unclear: 0, hitRate: 1 },
+      { provider: 'claude', role: 'BULL', reviews: 1, graded: 1, hit: 0, miss: 1, unclear: 0, hitRate: 0 },
+    ])
+    expect(data.scorecard.lossesWarnedByBear).toBe(1)
+    expect(data.scorecard.awaitingGrade).toBe(0)
+  })
+
+  it('counts reviews awaiting a grade once an outcome exists', async () => {
+    const { id } = await setup()
+    expect((await call('/api/journal')).data.scorecard.awaitingGrade).toBe(0)
+    await call(`/api/scenarios/${id}/paper-outcome`, { body: { exitPrice: 151.4 } })
+    expect((await call('/api/journal')).data.scorecard.awaitingGrade).toBe(2)
+  })
+
+  it('validates verdict, review ownership and content type', async () => {
+    const { id, bull } = await setup()
+    await call(`/api/scenarios/${id}/paper-outcome`, { body: { exitPrice: 151.4 } })
+    expect((await grade(id, bull.id, { verdict: 'CORRECT' })).status).toBe(400)
+    expect((await grade(id, bull.id, { verdict: 'HIT', extra: 1 })).status).toBe(400)
+    expect((await grade(id, 'missing-review', { verdict: 'HIT' })).status).toBe(404)
+    const other = (await createScenario()).data.scenario.id
+    expect((await grade(other, bull.id, { verdict: 'HIT' })).status).toBe(404) // review belongs to another scenario
+    const res = await app.request(`${base}/api/scenarios/${id}/reviews/${bull.id}/grade`, { method: 'PUT', body: 'verdict=HIT', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }, env)
+    expect(res.status).toBe(415)
+    const cross = await call(`/api/scenarios/${id}/reviews/${bull.id}/grade`, { method: 'PUT', body: { verdict: 'HIT' }, headers: { Origin: 'https://evil.example' } })
+    expect(cross.status).toBe(403)
   })
 })
