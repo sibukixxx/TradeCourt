@@ -23,7 +23,7 @@ migrate: ## Apply D1 (SQLite) migrations to the LOCAL database
 	$(PNPM) db:migrate:local
 
 ##@ Run
-dev: ## Run API + Web in the foreground (Ctrl+C to stop)
+dev: migrate ## Apply pending local migrations, then run API + Web in the foreground (Ctrl+C to stop)
 	$(PNPM) dev
 
 api: ## Run only the API Worker (:8787) in the foreground
@@ -32,7 +32,8 @@ api: ## Run only the API Worker (:8787) in the foreground
 web: ## Run only the Vite web app (:5173) in the foreground (needs the API)
 	$(PNPM) --filter @tradecourt/web dev
 
-start: ## Start API + Web in the background and wait until healthy
+start: ## Apply pending local migrations, start API + Web in the background, wait until healthy
+	@$(DEVCTL) running >/dev/null 2>&1 || $(PNPM) db:migrate:local >/dev/null 2>&1 || { echo 'Local migration failed. Run make migrate to see the error.'; exit 1; }
 	@$(DEVCTL) start
 
 stop: ## Stop the background servers started by `make start`

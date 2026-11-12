@@ -92,7 +92,7 @@ async function start() {
     if (api.status === 'setup_required') {
       console.log('')
       await stop({ quiet: true })
-      fail('Local database is not migrated. Run `make migrate`, then `make start`.')
+      fail('Local database migrations are pending. Run `make migrate`, then `make start`.')
     }
     if (api.status === 'ok' && web.status === 'ok') {
       console.log('✓')
@@ -200,6 +200,8 @@ async function restore(file) {
 const [command, arg] = process.argv.slice(2)
 const commands = {
   start, stop, status,
+  // Exit 0 when the background app is running (used by the Makefile to skip migrations then).
+  running: async () => { process.exit(running() ? 0 : 1) },
   restart: async () => { await stop(); await start() },
   'db-backup': async () => { backup() },
   'db-reset': reset,

@@ -22,6 +22,7 @@
 - [x] Phone UI: bottom tab bar, scenario picker, card tables, touch targets.
 - [x] Data export (JSON/CSV) and SQL backup/restore (`make db-backup` / `db-restore`).
 - [x] Decision-habit analysis (Insights): rule adherence, exit reasons, plan vs CSV path gaps, cumulative paper R.
+- [x] Rule-based level drafts from imported candles (swing / ATR stop, R target) and one-tap paper outcomes.
 - [ ] Strategy tags on scenarios for per-setup analysis.
 
 ## P2 — use outside localhost

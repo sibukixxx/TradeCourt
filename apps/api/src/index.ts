@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
+import { REQUIRED_MIGRATION } from './schema'
 import {
   calculatePaperRMultiple,
   calculateRiskReward,
@@ -199,11 +200,15 @@ app.get('/', (c) => c.json({
 }))
 
 // ---- Health ---------------------------------------------------------------------------------
+
 app.get('/api/health', async (c) => {
-  const { results } = await c.env.DB.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('scenarios','market_datasets')",
-  ).all<{ name: string }>()
-  if (results.length < 2) return c.json({ status: 'setup_required', message: 'Run pnpm db:migrate:local' }, 503)
+  const applied = await c.env.DB.prepare('SELECT name FROM d1_migrations WHERE name = ?')
+    .bind(REQUIRED_MIGRATION).first<{ name: string }>()
+    .catch(() => null) // d1_migrations does not exist before the first migration run
+  if (!applied) {
+    const message = `Local database migrations are pending (need ${REQUIRED_MIGRATION}). Stop the app and run: make migrate (or corepack pnpm db:migrate:local)`
+    return c.json({ status: 'setup_required', error: message, message, requiredMigration: REQUIRED_MIGRATION }, 503)
+  }
   return c.json({ status: 'ok', mode: 'local', liveMarketData: false, orderExecution: false })
 })
 

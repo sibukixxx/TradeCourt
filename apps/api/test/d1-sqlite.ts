@@ -26,13 +26,19 @@ class Statement {
   }
 }
 
+export const migrationsDir = join(import.meta.dirname, '..', 'migrations')
+export const migrationFiles = () => readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
+
 export function createTestD1(options: { migrate?: boolean } = {}) {
   const db = new DatabaseSync(':memory:')
   db.exec('PRAGMA foreign_keys = ON')
   if (options.migrate !== false) {
-    const dir = join(import.meta.dirname, '..', 'migrations')
-    for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    const dir = migrationsDir
+    // Mirror Wrangler: apply files in order and record them in d1_migrations.
+    db.exec('CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)')
+    for (const file of migrationFiles()) {
       db.exec(readFileSync(join(dir, file), 'utf8'))
+      db.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run(file)
     }
   }
   const d1 = {
