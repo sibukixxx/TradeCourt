@@ -1,0 +1,17 @@
+{
+  // LOCAL ONLY. UUID is a placeholder, not a production D1 database ID.
+  // The API has no authentication: DO NOT deploy publicly.
+  "name": "trade-court-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "dev": { "ip": "127.0.0.1", "port": 8787 },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trade-court-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

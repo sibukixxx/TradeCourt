@@ -1,0 +1,20 @@
+{
+  "name": "tradecourt",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.23.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"pnpm --filter @tradecourt/api dev\" \"pnpm --filter @tradecourt/web dev\"",
+    "db:migrate:local": "pnpm --filter @tradecourt/api db:migrate:local",
+    "test": "pnpm --filter @tradecourt/core test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm --filter @tradecourt/web build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3"
+  }
+}
