@@ -148,6 +148,10 @@ async function main() {
     await step('2b. Market: valid synthetic OHLC CSV imports with chart, high/low/change and provenance', async () => {
       await page.getByTestId('csv-input').setInputFiles({ name: 'synthetic-usdjpy.csv', mimeType: 'text/csv', buffer: Buffer.from(validCsv) })
       await page.getByTestId('csv-preview').waitFor()
+      // Timezone of the CSV timestamps is a required, explicit choice.
+      await page.getByRole('button', { name: 'ローカルD1に保存' }).click()
+      await page.getByRole('alert').getByText(/タイムゾーンを選択/).waitFor()
+      await page.getByTestId('tz-select').selectOption('+09:00')
       await page.getByRole('button', { name: 'ローカルD1に保存' }).click()
       const active = page.getByTestId('active-dataset')
       await active.waitFor()
@@ -155,6 +159,7 @@ async function main() {
       assert.equal(await active.getByTestId('stat-low').innerText(), '149.500')
       assert.equal(await active.getByTestId('stat-change').innerText(), '-0.07%')
       assert.match(await active.getByTestId('dataset-source').innerText(), /synthetic-usdjpy\.csv/)
+      assert.match(await active.getByTestId('dataset-tz').innerText(), /UTC\+09:00/)
       assert.equal(await active.getByTestId('close-chart').locator('polyline').count(), 1)
       assert.match(await page.locator('.panel').innerText(), /2026-01-05 → 2026-01-08/)
       await shot('01-market')
@@ -327,6 +332,65 @@ async function main() {
       assert.match(await page.getByTestId('scenario-table').innerText(), new RegExp(thesis.slice(0, 30)))
       await nav('Market Lens')
       assert.match(await page.getByTestId('dataset-source').innerText(), /synthetic-usdjpy\.csv/)
+    })
+
+    await step('16-17. Link a scenario to an imported candle, then check which level the CSV touched first', async () => {
+      // Unlinked scenarios explain why no path check is possible.
+      await page.goto(`${base}/#/journal/${scenarioId}`)
+      await page.reload()
+      await page.getByTestId('path-check-unlinked').waitFor()
+
+      await nav('Scenario')
+      const form = page.getByRole('form', { name: 'シナリオ登録' })
+      const datasets = (await apiJson('/api/market/datasets')).body.datasets
+      const ds = datasets.find((d) => d.sourceName === 'synthetic-usdjpy.csv')
+      await form.locator('select[name=datasetId]').selectOption(ds.id)
+      await form.locator('select[name=asOfDate]').selectOption('2026-01-06')
+      assert.equal(await page.getByTestId('as-of-close').innerText(), '151.000')
+      await form.getByRole('button', { name: 'Entryに使う' }).click()
+      assert.equal(await form.locator('input[name=entry]').inputValue(), '151')
+      await form.locator('input[name=stop]').fill('149.6')
+      await form.locator('input[name=target]').fill('152.4')
+      await page.getByTestId('rr-preview').getByText('1 : 1.00').waitFor()
+      assert.equal(await page.getByTestId('link-chart').locator('line.level').count(), 3)
+      await form.locator('textarea[name=thesis]').fill('Synthetic E2E linked thesis: hypothetical breakout after 2026-01-06')
+      await form.locator('textarea[name=invalidation]').fill('Synthetic close below 149.6')
+      await form.getByRole('button', { name: /Save/ }).click()
+      await page.getByRole('status').getByText('シナリオを保存しました').waitFor()
+      await page.getByTestId('court-as-of').getByText(/2026-01-06/).waitFor()
+      assert.match(await page.getByTestId('prompt').inputValue(), /仮説時点: 2026-01-06/)
+      const linkedId = page.url().split('/').pop()
+      const detail = (await apiJson(`/api/scenarios/${linkedId}`)).body
+      // 2026-01-06 00:00 JST + 1 day = 2026-01-06T15:00Z (as-of close).
+      assert.deepEqual(detail.scenario.marketRef, { datasetId: ds.id, asOfDate: '2026-01-06', asOfAt: '2026-01-06T15:00:00.000Z' })
+
+      await nav('Journal')
+      const result = page.getByTestId('path-result')
+      await result.waitFor()
+      // Next candle 2026-01-07 has low 149.5 <= stop 149.6 and high 151.1 < target 152.4.
+      assert.equal(await result.getByTestId('path-outcome').innerText(), '損切りに先に到達')
+      assert.equal(await result.getByTestId('path-r').innerText(), '-1.00R')
+      assert.match(await result.innerText(), /判定足 2026-01-07（1本目）/)
+      const chart = page.getByTestId('path-chart')
+      assert.equal(await chart.locator('line.level').count(), 3)
+      assert.equal(await chart.getByTestId('as-of-marker').count(), 1)
+      assert.equal(await chart.getByTestId('decided-marker').count(), 1)
+      // Each candle's high-low range is drawn, so the 149.5 low that touched the stop is visible.
+      assert.equal(await chart.locator('line.range').count(), 4)
+      // Record a paper exit that contradicts the CSV path: exitReason TARGET at 150.5.
+      const outcomeForm = page.getByRole('form', { name: '仮想結果の記録' })
+      await outcomeForm.locator('input[name=exitPrice]').fill('150.5')
+      await outcomeForm.getByRole('combobox', { name: '終了理由' }).selectOption('TARGET')
+      await outcomeForm.getByRole('button', { name: '仮想結果を保存' }).click()
+      const compare = page.getByTestId('path-compare')
+      await compare.waitFor()
+      assert.match(await compare.innerText(), /あなたの仮想結果\s*-0\.36R/)
+      assert.match(await compare.innerText(), /差\s*\+0\.64R/)
+      await compare.getByTestId('path-mismatch').waitFor()
+      await shot('05-path-check')
+      // Persisted link survives reload; the check is recomputed identically.
+      await page.reload()
+      assert.equal(await page.getByTestId('path-result').getByTestId('path-outcome').innerText(), '損切りに先に到達')
     })
 
     await step('Mobile (390x844): all four screens render without horizontal overflow', async () => {
