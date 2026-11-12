@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState } from 'preact/hooks'
 import { calculateRiskReward, scenarioInputSchema, type Scenario } from '@tradecourt/core'
 import { api, newRequestKey } from '../api'
 import { getError, price, timestamp } from '../format'
@@ -46,7 +46,7 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
     setDraft((old) => ({ ...old, [key]: value }))
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: Event) {
     event.preventDefault()
     if (busy) return
     if (!parsed.success) {
@@ -74,7 +74,7 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
       <form onSubmit={(e) => void submit(e)} className="scenario-form" aria-label="シナリオ登録">
         <div className="form-grid">
           <label>通貨ペア<input value="USD/JPY" readOnly /></label>
-          <label>時間足<select name="timeframe" value={draft.timeframe} onChange={(e) => patch('timeframe', e.target.value as Draft['timeframe'])}>
+          <label>時間足<select name="timeframe" value={draft.timeframe} onChange={(e) => patch('timeframe', e.currentTarget.value as Draft['timeframe'])}>
             <option value="1h">1時間</option><option value="4h">4時間</option><option value="1d">日足</option>
           </select></label>
           <fieldset className="side-toggle">
@@ -84,17 +84,17 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
           </fieldset>
         </div>
         <div className="form-grid price-grid">
-          <label>Entry / 仮説価格<input name="entry" type="number" inputMode="decimal" step="any" min="0.001" placeholder="150.200" required value={draft.entry} onChange={(e) => patch('entry', e.target.value)} /></label>
-          <label>Stop / 損切り<input name="stop" type="number" inputMode="decimal" step="any" min="0.001" placeholder="149.600" required value={draft.stop} onChange={(e) => patch('stop', e.target.value)} /></label>
-          <label>Target / 利確<input name="target" type="number" inputMode="decimal" step="any" min="0.001" placeholder="151.400" required value={draft.target} onChange={(e) => patch('target', e.target.value)} /></label>
+          <label>Entry / 仮説価格<input name="entry" type="number" inputMode="decimal" step="any" min="0.001" placeholder="150.200" required value={draft.entry} onInput={(e) => patch('entry', e.currentTarget.value)} /></label>
+          <label>Stop / 損切り<input name="stop" type="number" inputMode="decimal" step="any" min="0.001" placeholder="149.600" required value={draft.stop} onInput={(e) => patch('stop', e.currentTarget.value)} /></label>
+          <label>Target / 利確<input name="target" type="number" inputMode="decimal" step="any" min="0.001" placeholder="151.400" required value={draft.target} onInput={(e) => patch('target', e.currentTarget.value)} /></label>
         </div>
         <div className={'ratio-preview' + (directionIssue ? ' invalid' : '')} data-testid="rr-preview" aria-live="polite">
           <span>想定リスクリワード</span>
           <strong>{ratio !== null ? '1 : ' + ratio.toFixed(2) : directionIssue ? '方向が不正' : '入力待ち'}</strong>
           <span>{draft.side === 'LONG' ? 'LONG: Stop < Entry < Target' : 'SHORT: Target < Entry < Stop'}</span>
         </div>
-        <label>エントリーの根拠（12文字以上）<textarea name="thesis" required minLength={12} maxLength={2000} rows={3} placeholder="具体的な根拠。現時点で確認できていない点も書いてください。" value={draft.thesis} onChange={(e) => patch('thesis', e.target.value)} /></label>
-        <label>この仮説が無効になる条件（5文字以上）<textarea name="invalidation" required minLength={5} maxLength={1000} rows={2} placeholder="例：特定価格を終値で割った場合" value={draft.invalidation} onChange={(e) => patch('invalidation', e.target.value)} /></label>
+        <label>エントリーの根拠（12文字以上）<textarea name="thesis" required minLength={12} maxLength={2000} rows={3} placeholder="具体的な根拠。現時点で確認できていない点も書いてください。" value={draft.thesis} onInput={(e) => patch('thesis', e.currentTarget.value)} /></label>
+        <label>この仮説が無効になる条件（5文字以上）<textarea name="invalidation" required minLength={5} maxLength={1000} rows={2} placeholder="例：特定価格を終値で割った場合" value={draft.invalidation} onInput={(e) => patch('invalidation', e.currentTarget.value)} /></label>
         <div className="form-footer"><span>発注は行いません。保存後、AIに反証を依頼できます。</span><button className="primary" type="submit" disabled={busy}>{busy ? '保存中…' : 'Save & challenge →'}</button></div>
       </form>
 

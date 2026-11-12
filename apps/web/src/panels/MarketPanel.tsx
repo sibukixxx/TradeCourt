@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   MAX_CSV_BYTES,
   parseOhlcCsv,
@@ -22,8 +22,8 @@ function MarketChart({ candles }: { candles: Candle[] }) {
     <div className="chart-wrap">
       <div className="chart-axis"><span>{price(max)}</span><span>終値（CSV）</span></div>
       <svg viewBox="0 0 640 200" preserveAspectRatio="none" role="img" aria-label="インポートしたCSVの終値推移" data-testid="close-chart">
-        <line vectorEffect="non-scaling-stroke" x1="0" y1="100" x2="640" y2="100" className="chart-grid" />
-        <polyline vectorEffect="non-scaling-stroke" points={chartPoints(candles)} fill="none" stroke="#6bceb6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <line vector-effect="non-scaling-stroke" x1="0" y1="100" x2="640" y2="100" className="chart-grid" />
+        <polyline vector-effect="non-scaling-stroke" points={chartPoints(candles)} fill="none" stroke="#6bceb6" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
       </svg>
       <div className="chart-axis"><span>{price(min)}</span><span>{candles[0].date} → {candles[candles.length - 1].date}</span></div>
     </div>
@@ -124,14 +124,14 @@ export function MarketPanel() {
         <label className="dropzone">
           <strong>OHLC CSVを選択</strong>
           <span>ヘッダーに date,open,high,low,close（順不同・他列は無視）/ 昇順・重複なし / 最大5,000行・2MB</span>
-          <input ref={fileInput} data-testid="csv-input" type="file" accept=".csv,text/csv" onChange={(e) => void readFile(e.target.files?.[0])} />
+          <input ref={fileInput} data-testid="csv-input" type="file" accept=".csv,text/csv" onChange={(e) => void readFile(e.currentTarget.files?.[0])} />
         </label>
         <div className="import-meta">
           <label>銘柄<input value="USD/JPY" readOnly /></label>
-          <label>時間足<select value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)}>
+          <label>時間足<select value={timeframe} onChange={(e) => setTimeframe(e.currentTarget.value as Timeframe)}>
             <option value="1h">1時間</option><option value="4h">4時間</option><option value="1d">日足</option>
           </select></label>
-          <label>出典メモ（任意）<input maxLength={500} placeholder="例: 証券会社エクスポート / 合成データ" value={sourceNote} onChange={(e) => setSourceNote(e.target.value)} /></label>
+          <label>出典メモ（任意）<input maxLength={500} placeholder="例: 証券会社エクスポート / 合成データ" value={sourceNote} onInput={(e) => setSourceNote(e.currentTarget.value)} /></label>
         </div>
       </div>
       {error && <p className="inline-error" role="alert">{error}</p>}
