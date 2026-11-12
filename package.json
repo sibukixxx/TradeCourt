@@ -9,13 +9,15 @@
   "scripts": {
     "dev": "concurrently -k -n api,web \"pnpm --filter @tradecourt/api dev\" \"pnpm --filter @tradecourt/web dev\"",
     "db:migrate:local": "pnpm --filter @tradecourt/api db:migrate:local",
-    "test": "pnpm --filter @tradecourt/core test",
+    "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm --filter @tradecourt/web build",
-    "smoke:local": "node scripts/smoke-local.mjs"
+    "smoke:local": "node scripts/smoke-local.mjs",
+    "test:e2e": "node scripts/e2e-browser.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "playwright": "1.63.0"
   }
 }

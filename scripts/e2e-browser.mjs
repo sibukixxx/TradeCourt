@@ -1,0 +1,305 @@
+#!/usr/bin/env node
+// TradeCourt browser E2E (Playwright, Chromium). SYNTHETIC data only.
+//
+// Default: starts an ISOLATED stack (temporary local D1 via --persist-to, API :8798, web :5183),
+// so your own local journal is never touched, then deletes the temp state.
+// Set TRADECOURT_E2E_BASE_URL=http://127.0.0.1:5173 to run against an already running `pnpm dev`
+// instead (synthetic records will then remain in your local D1).
+//
+// Every non-loopback request is blocked and recorded; the run FAILS if any is attempted.
+// External AI sites are never opened, logged into or automated: only link attributes are checked.
+import { spawn } from 'node:child_process'
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import assert from 'node:assert/strict'
+import { chromium } from 'playwright'
+
+const root = resolve(import.meta.dirname, '..')
+const outDir = resolve(root, process.env.TRADECOURT_E2E_OUT ?? 'test-results/e2e')
+mkdirSync(outDir, { recursive: true })
+const LOOPBACK = /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$)/
+const children = []
+let tempState = null
+
+function run(cmd, args, opts = {}) {
+  const child = spawn(cmd, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], detached: true, ...opts })
+  let log = ''
+  child.stdout.on('data', (d) => { log += d })
+  child.stderr.on('data', (d) => { log += d })
+  child.getLog = () => log
+  return child
+}
+function exec(cmd, args, opts) {
+  return new Promise((ok, fail) => {
+    const child = run(cmd, args, { ...opts, detached: false })
+    child.on('exit', (code) => (code === 0 ? ok(child.getLog()) : fail(new Error(`${cmd} ${args.join(' ')} exited ${code}\n${child.getLog()}`))))
+  })
+}
+async function waitFor(url, ms = 60_000) {
+  const until = Date.now() + ms
+  while (Date.now() < until) {
+    try { const r = await fetch(url); if (r.ok) return } catch { /* not up yet */ }
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  throw new Error(`Timed out waiting for ${url}`)
+}
+function cleanup() {
+  for (const c of children) { try { process.kill(-c.pid, 'SIGTERM') } catch { /* gone */ } }
+  if (tempState) rmSync(tempState, { recursive: true, force: true })
+}
+process.on('SIGINT', () => { cleanup(); process.exit(130) })
+
+async function startIsolatedStack() {
+  tempState = mkdtempSync(join(tmpdir(), 'tradecourt-e2e-'))
+  const apiDir = join(root, 'apps/api')
+  const wrangler = join(apiDir, 'node_modules/.bin/wrangler')
+  await exec(wrangler, ['d1', 'migrations', 'apply', 'trade-court-local', '--local', '--persist-to', tempState], { cwd: apiDir, env: { ...process.env, CI: '1' } })
+  const api = run(wrangler, ['dev', '--local', '--port', '8798', '--ip', '127.0.0.1', '--persist-to', tempState, '--inspector-port', '0'], { cwd: apiDir })
+  children.push(api)
+  await waitFor('http://127.0.0.1:8798/api/health').catch((e) => { throw new Error(e.message + '\n' + api.getLog()) })
+  const webDir = join(root, 'apps/web')
+  const web = run(join(webDir, 'node_modules/.bin/vite'), [], {
+    cwd: webDir, env: { ...process.env, TRADECOURT_API_ORIGIN: 'http://127.0.0.1:8798', TRADECOURT_WEB_PORT: '5183' },
+  })
+  children.push(web)
+  await waitFor('http://127.0.0.1:5183/api/health').catch((e) => { throw new Error(e.message + '\n' + web.getLog()) })
+  return 'http://127.0.0.1:5183'
+}
+
+// ---- Synthetic fixtures (clearly NOT real market data) ---------------------------------------
+const validCsv = ['date,open,high,low,close',
+  '2026-01-05,150.00,150.80,149.70,150.50',
+  '2026-01-06,150.50,151.20,150.10,151.00',
+  '2026-01-07,151.00,151.10,149.50,149.90',
+  '2026-01-08,149.90,150.60,149.80,150.40'].join('\n')
+const badCsv = 'date,open,high,low,close\n2026-01-05,150,149,148,150\n2026-01-06,150,151,149,150'
+const XSS = '<img src=x onerror="window.__xss=1"><script>window.__xss=2</script>'
+
+const steps = []
+async function step(name, fn) {
+  const started = Date.now()
+  try {
+    await fn()
+    steps.push({ name, status: 'PASS', ms: Date.now() - started })
+    console.log(`PASS  ${name}`)
+  } catch (e) {
+    steps.push({ name, status: 'FAIL', ms: Date.now() - started, error: e.message })
+    console.log(`FAIL  ${name}\n      ${e.message.split('\n').join('\n      ')}`)
+    throw e
+  }
+}
+
+async function main() {
+  const external = process.env.TRADECOURT_E2E_BASE_URL
+  if (external && !LOOPBACK.test(external)) throw new Error('TRADECOURT_E2E_BASE_URL must be loopback')
+  const base = external ?? await startIsolatedStack()
+  console.log(`TradeCourt browser E2E against ${base} (${external ? 'existing dev server' : 'isolated temp D1'})`)
+
+  const browser = await chromium.launch()
+  const blocked = []
+  const newContext = async (opts = {}) => {
+    const ctx = await browser.newContext({ deviceScaleFactor: 1, ...opts })
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base })
+    await ctx.route('**/*', (route) => {
+      const url = route.request().url()
+      if (LOOPBACK.test(url) || url.startsWith('data:') || url.startsWith('blob:')) return route.continue()
+      blocked.push(url)
+      return route.abort('blockedbyclient')
+    })
+    return ctx
+  }
+  const ctx = await newContext({ viewport: { width: 1440, height: 1000 } })
+  const page = await ctx.newPage()
+  const dialogs = []
+  page.on('dialog', (d) => { dialogs.push(d.message()); void d.dismiss() })
+  const pageErrors = []
+  page.on('pageerror', (e) => pageErrors.push(e.message))
+  const shot = (name) => page.screenshot({ path: join(outDir, `${name}.png`), fullPage: true })
+  const nav = (label) => page.getByRole('navigation', { name: '画面' }).getByRole('button', { name: label }).click()
+  const apiJson = (path, init) => page.evaluate(async ([p, i]) => {
+    const r = await fetch(p, i); return { status: r.status, body: await r.json() }
+  }, [path, init])
+  const thesis = `Synthetic E2E thesis ${Date.now()}: hypothetical pullback, not real data`
+  let scenarioId = ''
+
+  try {
+    await step('1. App starts and API/D1 is ready', async () => {
+      await page.goto(base)
+      await page.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
+      assert.equal(await page.title(), 'TradeCourt — Decision Review')
+    })
+
+    await step('2. Market: invalid and oversized CSV are rejected safely', async () => {
+      await nav('Market Lens')
+      await page.getByRole('heading', { name: /Market Lens/ }).waitFor()
+      await page.getByTestId('csv-input').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from(badCsv) })
+      await page.getByRole('alert').getByText(/2行目の値が不正/).waitFor()
+      await page.getByTestId('csv-input').setInputFiles({ name: 'huge.csv', mimeType: 'text/csv', buffer: Buffer.alloc(2 * 1024 * 1024 + 1, 'a') })
+      await page.getByRole('alert').getByText(/2MB以下/).waitFor()
+      assert.equal(await page.getByTestId('csv-preview').count(), 0)
+    })
+
+    await step('2b. Market: valid synthetic OHLC CSV imports with chart, high/low/change and provenance', async () => {
+      await page.getByTestId('csv-input').setInputFiles({ name: 'synthetic-usdjpy.csv', mimeType: 'text/csv', buffer: Buffer.from(validCsv) })
+      await page.getByTestId('csv-preview').waitFor()
+      await page.getByRole('button', { name: 'ローカルD1に保存' }).click()
+      const active = page.getByTestId('active-dataset')
+      await active.waitFor()
+      assert.equal(await active.getByTestId('stat-high').innerText(), '151.200')
+      assert.equal(await active.getByTestId('stat-low').innerText(), '149.500')
+      assert.equal(await active.getByTestId('stat-change').innerText(), '-0.07%')
+      assert.match(await active.getByTestId('dataset-source').innerText(), /synthetic-usdjpy\.csv/)
+      assert.equal(await active.getByTestId('close-chart').locator('polyline').count(), 1)
+      assert.match(await page.locator('.panel').innerText(), /2026-01-05 → 2026-01-08/)
+      await shot('01-market')
+    })
+
+    await step('3-4. Scenario: R:R is auto-calculated, direction errors shown, save persists', async () => {
+      await nav('Scenario')
+      const form = page.getByRole('form', { name: 'シナリオ登録' })
+      await form.locator('input[name=entry]').fill('150.2')
+      await form.locator('input[name=stop]').fill('151')
+      await form.locator('input[name=target]').fill('151.4')
+      await page.getByTestId('rr-preview').getByText('方向が不正').waitFor()
+      await form.locator('input[name=stop]').fill('149.6')
+      await page.getByTestId('rr-preview').getByText('1 : 2.00').waitFor()
+      await form.locator('textarea[name=thesis]').fill(thesis)
+      await form.locator('textarea[name=invalidation]').fill('Synthetic: 4h close below 149.600')
+      const before = (await apiJson('/api/scenarios')).body.scenarios.length
+      await form.getByRole('button', { name: /Save/ }).dblclick() // double submit must not duplicate
+      await page.getByRole('status').getByText('シナリオを保存しました').waitFor()
+      await page.getByRole('heading', { name: 'AI Court' }).waitFor()
+      const after = (await apiJson('/api/scenarios')).body.scenarios
+      assert.equal(after.length, before + 1, 'double click created duplicate scenarios')
+      scenarioId = after.find((s) => s.thesis === thesis).id
+      assert.ok(page.url().includes(`#/court/${scenarioId}`))
+    })
+
+    await step('5-6. AI Court: BULL/BEAR prompts generated from saved scenario and copied to clipboard', async () => {
+      const prompt = page.getByTestId('prompt')
+      assert.match(await prompt.inputValue(), /役割: 反対側/)
+      assert.match(await prompt.inputValue(), new RegExp(thesis.slice(0, 30)))
+      await page.getByRole('button', { name: 'プロンプトをコピー' }).click()
+      await page.getByRole('button', { name: 'コピー済み ✓' }).waitFor()
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), await prompt.inputValue())
+      await page.getByRole('button', { name: '賛成側 / BULL' }).click()
+      assert.match(await prompt.inputValue(), /役割: 賛成側/)
+      await page.getByRole('button', { name: 'プロンプトをコピー' }).click()
+      const clip = await page.evaluate(() => navigator.clipboard.readText())
+      assert.match(clip, /役割: 賛成側/)
+      assert.match(clip, /リスクリワード: 1:2/)
+    })
+
+    await step('7. AI Court: official AI links (not opened, not automated)', async () => {
+      const expected = { chatgpt: 'https://chatgpt.com/', claude: 'https://claude.ai/new', gemini: 'https://gemini.google.com/app', grok: 'https://grok.com/' }
+      const select = page.getByRole('combobox', { name: '質問するAIサービス' })
+      for (const [value, href] of Object.entries(expected)) {
+        await select.selectOption(value)
+        const link = page.getByTestId('open-ai')
+        assert.equal(await link.getAttribute('href'), href)
+        assert.equal(await link.getAttribute('target'), '_blank')
+        assert.equal(await link.getAttribute('rel'), 'noopener noreferrer')
+      }
+    })
+
+    await step('8-9. Synthetic AI answers pasted manually, stored with provider/role/time, compared side by side; HTML not executed', async () => {
+      const form = page.getByRole('form', { name: 'AI回答の保存' })
+      await form.getByRole('combobox', { name: '回答したAIサービス' }).selectOption('claude')
+      await form.getByRole('combobox', { name: '役割' }).selectOption('BULL')
+      await form.locator('textarea[name=review]').fill('【合成テスト回答 / SYNTHETIC】賛成側: 押し目の仮説は条件付きで成立し得る。')
+      await form.getByRole('button', { name: '審査記録を保存' }).click()
+      await page.getByRole('status').getByText(/ClaudeのBULL回答/).waitFor()
+      await form.getByRole('combobox', { name: '回答したAIサービス' }).selectOption('chatgpt')
+      await form.getByRole('combobox', { name: '役割' }).selectOption('BEAR')
+      await form.locator('textarea[name=review]').fill(`【合成テスト回答 / SYNTHETIC】反対側: 指標前の逆行リスク。${XSS}`)
+      await form.getByRole('button', { name: '審査記録を保存' }).click()
+      await page.getByRole('status').getByText(/ChatGPTのBEAR回答/).waitFor()
+      const compare = page.getByTestId('review-compare')
+      await compare.getByTestId('review-card').nth(1).waitFor()
+      const [bullCol, bearCol] = [compare.locator('> div').nth(0), compare.locator('> div').nth(1)]
+      assert.equal(await bullCol.getByTestId('review-card').count(), 1)
+      assert.equal(await bearCol.getByTestId('review-card').count(), 1)
+      assert.match(await bullCol.innerText(), /Claude[\s\S]*回答日時/)
+      assert.match(await bearCol.innerText(), /ChatGPT/)
+      assert.ok((await bearCol.innerText()).includes('<script>window.__xss=2</script>'), 'HTML should render as literal text')
+      assert.equal(await page.evaluate(() => window.__xss), undefined, 'pasted HTML executed!')
+      assert.equal(await compare.locator('img, script').count(), 0)
+      await shot('02-ai-court')
+    })
+
+    await step('10-11. Journal: paper exit recorded, R multiple shown, plan vs decision compared', async () => {
+      await nav('Journal')
+      const form = page.getByRole('form', { name: '仮想結果の記録' })
+      await form.locator('input[name=exitPrice]').fill('151.4')
+      await page.getByTestId('r-preview').getByText('+2.00R').waitFor()
+      await form.getByRole('combobox', { name: '終了理由' }).selectOption('TARGET')
+      await form.locator('textarea[name=note]').fill('Synthetic reflection: followed the plan; BEAR risk did not materialize.')
+      await form.getByRole('button', { name: '仮想結果を保存' }).click()
+      const result = page.getByTestId('outcome-result')
+      await result.waitFor()
+      assert.equal(await result.getByTestId('r-multiple').innerText(), '+2.00R')
+      assert.match(await result.innerText(), /利確価格どおり/)
+      assert.match(await result.innerText(), /従った/)
+      assert.equal(await page.getByTestId('journal-reviews').locator('li').count(), 2)
+      assert.match(await page.getByTestId('journal-table').innerText(), /\+2\.00R/)
+      await shot('03-journal')
+    })
+
+    await step('Error paths via API: duplicate outcome 409, invalid stop 400, missing id 404, malformed 400, cross-origin 403', async () => {
+      const post = (path, body, headers = {}) => apiJson(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body })
+      assert.equal((await post(`/api/scenarios/${scenarioId}/paper-outcome`, JSON.stringify({ exitPrice: 149.6 }))).status, 409)
+      assert.equal((await post('/api/scenarios', JSON.stringify({ symbol: 'USDJPY', timeframe: '4h', side: 'LONG', entry: 150, stop: 151, target: 152, thesis: 'Synthetic invalid stop', invalidation: 'none!' }))).status, 400)
+      assert.equal((await post('/api/scenarios', JSON.stringify({ symbol: 'USDJPY' }))).status, 400)
+      assert.equal((await apiJson('/api/scenarios/does-not-exist')).status, 404)
+      assert.equal((await post('/api/scenarios', '{not json')).status, 400)
+      const res = await fetch(`${base}/api/scenarios`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: '{}' })
+      assert.equal(res.status, 403)
+    })
+
+    await step('12-13. Reload: all data persists (market, scenario, reviews, outcome, route)', async () => {
+      await page.reload()
+      await page.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
+      assert.ok(page.url().includes(`#/journal/${scenarioId}`))
+      assert.equal(await page.getByTestId('outcome-result').getByTestId('r-multiple').innerText(), '+2.00R')
+      await nav('AI Court')
+      await page.getByTestId('review-compare').getByTestId('review-card').nth(1).waitFor()
+      assert.equal(await page.getByTestId('review-card').count(), 2)
+      await nav('Scenario')
+      assert.match(await page.getByTestId('scenario-table').innerText(), new RegExp(thesis.slice(0, 30)))
+      await nav('Market Lens')
+      assert.match(await page.getByTestId('dataset-source').innerText(), /synthetic-usdjpy\.csv/)
+    })
+
+    await step('Mobile (390x844): all four screens render without horizontal overflow', async () => {
+      const mctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+      const m = await mctx.newPage()
+      const headings = { market: /Market Lens/, scenario: /New Scenario/, court: /AI Court/, journal: /Journal/ }
+      for (const [i, route] of Object.keys(headings).entries()) {
+        await m.goto(`${base}/#/${route}/${scenarioId}`)
+        await m.reload() // fresh load per screen: hash-only goto is a same-document navigation
+        await m.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
+        await m.locator('.panel h2').filter({ hasText: headings[route] }).waitFor()
+        await m.waitForTimeout(200)
+        const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+        assert.ok(overflow <= 0, `${route}: horizontal overflow ${overflow}px`)
+        await m.screenshot({ path: join(outDir, `mobile-0${i + 1}-${route}.png`), fullPage: true })
+      }
+      await mctx.close()
+    })
+
+    await step('No external network request, dialog or page error occurred', async () => {
+      assert.deepEqual(blocked, [], 'external requests attempted')
+      assert.deepEqual(dialogs, [], 'unexpected dialogs')
+      assert.deepEqual(pageErrors, [], 'page errors')
+    })
+  } finally {
+    await browser.close()
+    console.log(`\nScreenshots: ${outDir}`)
+  }
+  const failed = steps.filter((s) => s.status !== 'PASS')
+  console.log(`\n${failed.length ? 'FAIL' : 'PASS'}: ${steps.length - failed.length}/${steps.length} browser E2E steps`)
+  if (failed.length) process.exitCode = 1
+}
+
+main().catch((e) => { if (!steps.some((s) => s.status === 'FAIL')) console.error(e); process.exitCode = 1 }).finally(cleanup)

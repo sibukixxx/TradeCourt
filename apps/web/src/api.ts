@@ -1,5 +1,11 @@
 import type {
+  JournalEntry,
+  JournalSummary,
+  MarketDataset,
+  MarketDatasetInput,
+  MarketDatasetMeta,
   PaperOutcome,
+  PaperOutcomeInput,
   Review,
   ReviewInput,
   Scenario,
@@ -7,34 +13,61 @@ import type {
   ScenarioInput,
 } from '@tradecourt/core'
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-  })
+// Same-origin relative /api only (Vite proxies to the loopback Worker). No external calls.
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly issues: { path: string; message: string }[] = []) {
+    super(message)
+  }
+}
+
+async function request<T>(path: string, options: RequestInit & { idempotencyKey?: string } = {}): Promise<T> {
+  const { idempotencyKey, ...init } = options
+  let response: Response
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: {
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+        ...init.headers,
+      },
+    })
+  } catch {
+    throw new ApiError('ローカルAPIに接続できません。pnpm dev が起動しているか確認してください。', 0)
+  }
   const result: unknown = await response.json().catch(() => null)
   if (!response.ok) {
-    const message = result && typeof result === 'object' && 'error' in result &&
-      typeof result.error === 'string' ? result.error : `API HTTP ${response.status}`
-    throw new Error(message)
+    const obj = (result && typeof result === 'object' ? result : {}) as { error?: unknown; issues?: unknown }
+    const issues = Array.isArray(obj.issues) ? obj.issues as { path: string; message: string }[] : []
+    const base = typeof obj.error === 'string' ? obj.error : `API HTTP ${response.status}`
+    const detail = issues.length ? `: ${issues.slice(0, 3).map((i) => `${i.path || 'body'} — ${i.message}`).join(' / ')}` : ''
+    throw new ApiError(base + detail, response.status, issues)
   }
   return result as T
 }
 
+export const newRequestKey = () => crypto.randomUUID()
+
 export const api = {
   health: () => request<{ status: string; mode: string }>('/api/health'),
   list: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
-  create: (input: ScenarioInput) => request<{ scenario: Scenario }>('/api/scenarios', {
-    method: 'POST', body: JSON.stringify(input),
+  create: (input: ScenarioInput, idempotencyKey: string) => request<{ scenario: Scenario }>('/api/scenarios', {
+    method: 'POST', body: JSON.stringify(input), idempotencyKey,
   }),
   detail: (id: string) => request<ScenarioDetail>(`/api/scenarios/${encodeURIComponent(id)}`),
-  review: (id: string, input: ReviewInput) => request<{ review: Review }>(
+  review: (id: string, input: ReviewInput, idempotencyKey: string) => request<{ review: Review }>(
     `/api/scenarios/${encodeURIComponent(id)}/reviews`,
+    { method: 'POST', body: JSON.stringify(input), idempotencyKey },
+  ),
+  paperOutcome: (id: string, input: PaperOutcomeInput) => request<{ outcome: PaperOutcome }>(
+    `/api/scenarios/${encodeURIComponent(id)}/paper-outcome`,
     { method: 'POST', body: JSON.stringify(input) },
   ),
-  paperOutcome: (id: string, exitPrice: number, note: string) =>
-    request<{ outcome: PaperOutcome }>(
-      `/api/scenarios/${encodeURIComponent(id)}/paper-outcome`,
-      { method: 'POST', body: JSON.stringify({ exitPrice, note }) },
-    ),
+  journal: () => request<{ entries: JournalEntry[]; summary: JournalSummary }>('/api/journal'),
+  datasets: () => request<{ datasets: MarketDatasetMeta[] }>('/api/market/datasets'),
+  dataset: (id: string) => request<{ dataset: MarketDataset }>(`/api/market/datasets/${encodeURIComponent(id)}`),
+  importDataset: (input: MarketDatasetInput, idempotencyKey: string) => request<{ dataset: MarketDataset }>(
+    '/api/market/datasets', { method: 'POST', body: JSON.stringify(input), idempotencyKey },
+  ),
 }
