@@ -21,11 +21,13 @@ User-initiated Copy -> official AI website -> user pastes answer -> TradeCourt
 | Method & path | Notes |
 | --- | --- |
 | `GET /api/health` | `ok` once migrations applied; `liveMarketData: false`, `orderExecution: false`. 503 otherwise. |
-| `GET /api/scenarios`, `POST /api/scenarios` | Create is validated by `scenarioInputSchema`; optional `Idempotency-Key` header makes retries / double clicks return the same record (`200`, `replayed: true`). |
+| `GET /api/scenarios`, `POST /api/scenarios` | Create is validated by `scenarioInputSchema`; optional `Idempotency-Key` header makes retries / double clicks return the same record (`200`, `replayed: true`). Optional `marketRef: { datasetId, asOfDate }` links the scenario to an imported candle; the server checks the candle exists and fixes `asOfAt` (that candle's close as an absolute UTC instant). |
 | `GET /api/scenarios/:id` | Scenario + reviews + paper outcome. 404 if missing. |
 | `POST /api/scenarios/:id/reviews` | Manual paste: `provider`, `role` (BULL/BEAR), `content`, optional `respondedAt` (not in the future). Idempotency-Key supported. |
 | `POST /api/scenarios/:id/paper-outcome` | `exitPrice`, `exitReason` (TARGET/STOP/INVALIDATED/MANUAL), `followedPlan`, `note`. Exactly one per scenario; repeat → 409. |
 | `PUT /api/scenarios/:id/reviews/:reviewId/grade` | Post-hoc grading: `verdict` (HIT/MISS/UNCLEAR), optional `note`. 409 until the scenario has a paper outcome; 404 if the review belongs to another scenario. Re-grading overwrites (the user's judgment), the paper outcome stays immutable. |
+| `GET /api/scenarios/:id/path-check[?datasetId=]` | Reference only, computed on demand (never stored): first touch of stop/target in an imported dataset after the as-of close. Default dataset = newest import with later candles. 409 if the scenario is not linked. |
+| `GET /` | Guidance: this port is the API; the UI is on :5173. |
 | `GET /api/journal` | All scenarios with review/graded counts and paper outcomes + summary + `scorecard` (per AI × role hit rate, awaiting grade, losses warned by BEAR) (`kind: "paper"`). |
 | `GET/POST /api/market/datasets`, `GET /api/market/datasets/:id` | Imported OHLC snapshots (≤5,000 candles, ascending, consistent OHLC), served with computed stats and `verified: false`. |
 
@@ -35,8 +37,10 @@ Errors are JSON `{ error, issues? }`: 400 invalid/malformed, 403 non-loopback Ho
 - `scenarios`: immutable price snapshot, thesis and invalidation point. No edit in MVP.
 - `reviews`: manually pasted AI response, attributed provider, argument role and user-declared answer time; not market evidence. `verdict` / `verdict_note` / `graded_at` hold the user's post-hoc grade (NULL = ungraded).
 - `paper_outcomes`: one user-entered hypothetical close per scenario (exit reason, rule adherence), never a broker fill.
+- `scenarios.dataset_id / as_of_candle / as_of_at`: optional immutable market link (migration 0004).
+- `market_datasets.tz_offset`: fixed UTC offset of timestamps without one (NULL = not specified, computed as UTC).
 - `market_datasets`: user-imported CSV snapshot (source file name, note, period, candles JSON). Not live, not verified.
-- Database: SQLite via local D1 (Wrangler stores it under `apps/api/.wrangler/state`). Migrations are additive: `0001_init.sql`, `0002_mvp_review_journal_market.sql`, `0003_review_grading.sql`.
+- Database: SQLite via local D1 (Wrangler stores it under `apps/api/.wrangler/state`). Migrations are additive: `0001_init.sql`, `0002_mvp_review_journal_market.sql`, `0003_review_grading.sql`, `0004_market_link_timezone.sql`.
 
 Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wrangler/` (gitignored). The configured D1 ID is a **local-only placeholder**. Do not provision or deploy a remote D1 until a separate security/release gate.
 
@@ -47,6 +51,12 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 - No broker credentials, real trade execution, live data feed, scheduled fetches or investor suitability claim.
 - Uploaded/typed price snapshots and simulated outcomes are user inputs, **not verified exchange data**.
 - Calculate R multiple from entry, stop and user-entered exit; does not include fees, swaps, slippage or taxes.
+
+## Path check rules (`packages/core/src/path.ts`)
+- Candle timestamps are bar OPEN times. Value offsets win; otherwise the dataset `tz_offset` applies (default UTC).
+- The position is assumed open at Entry at the as-of candle CLOSE (open + timeframe). Only candles opening at/after that instant are used, so finer-timeframe data cannot leak the as-of candle's interior (no look-ahead).
+- LONG: stop if low ≤ stop, target if high ≥ target (mirrored for SHORT). Both in one candle → AMBIGUOUS, unless the candle opened beyond a level (gap), which decides it at the open; the open R is reported.
+- MFE/MAE use only candles before the deciding one. No spread, slippage, fees or swaps. DST-observing zones are not modelled (fixed offsets only).
 
 ## Testing
 - `pnpm test`: core unit tests + API route tests on `apps/api/test/d1-sqlite.ts`, a tiny D1 shim over Node's built-in `node:sqlite` that applies the real migration files.
