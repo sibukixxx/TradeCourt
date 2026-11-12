@@ -7,6 +7,7 @@ import {
   type JournalEntry,
   type JournalSummary,
   type ReviewScorecard,
+  type PathOutcome,
   type PlanComparison,
   type ScenarioDetail,
 } from '@tradecourt/core'
@@ -47,6 +48,7 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
   const [followedPlan, setFollowedPlan] = useState(true)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pathOutcome, setPathOutcome] = useState<PathOutcome | null>(null)
 
   const selected = detail?.scenario
   const exitNum = Number(exitPrice)
@@ -134,8 +136,8 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
               </form>
             )}
           </div>
-          <PathCheck detail={detail} onError={onError} />
-          <ReviewGrading detail={detail} onSaved={onSaved} onError={onError} onNotice={onNotice} />
+          <PathCheck detail={detail} onError={onError} onResult={setPathOutcome} />
+          <ReviewGrading detail={detail} pathOutcome={pathOutcome} onSaved={onSaved} onError={onError} onNotice={onNotice} />
         </div>
       )}
 

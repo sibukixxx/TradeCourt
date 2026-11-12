@@ -1,4 +1,5 @@
 import type {
+  DecisionAnalysis,
   JournalResponse,
   MarketDataset,
   MarketDatasetInput,
@@ -70,6 +71,9 @@ export const api = {
     { method: 'PUT', body: JSON.stringify(input) },
   ),
   journal: () => request<JournalResponse>('/api/journal'),
+  analysis: (limit: number | null) => request<{ analysis: DecisionAnalysis; kind: 'paper' }>(
+    `/api/analysis${limit ? `?limit=${limit}` : ''}`,
+  ),
   pathCheck: (scenarioId: string, datasetId?: string) => request<PathCheckResponse>(
     `/api/scenarios/${encodeURIComponent(scenarioId)}/path-check${datasetId ? `?datasetId=${encodeURIComponent(datasetId)}` : ''}`,
   ),
@@ -79,3 +83,6 @@ export const api = {
     '/api/market/datasets', { method: 'POST', body: JSON.stringify(input), idempotencyKey },
   ),
 }
+
+/** Same-origin download links (served by the local API through the Vite proxy). */
+export const exportUrl = (format: 'csv' | 'json') => `/api/export?format=${format}`

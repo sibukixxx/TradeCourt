@@ -12,9 +12,14 @@ export const pathOutcomeLabels: Record<PathOutcome, string> = {
   NO_DATA: '仮説時点より後のデータなし',
 }
 
-type Props = { detail: ScenarioDetail; onError: (message: string) => void }
+type Props = {
+  detail: ScenarioDetail
+  onError: (message: string) => void
+  /** Reports the evaluated path outcome so grading can suggest verdicts from price action. */
+  onResult?: (outcome: PathOutcome | null) => void
+}
 
-export function PathCheck({ detail, onError }: Props) {
+export function PathCheck({ detail, onError, onResult }: Props) {
   const { scenario, outcome } = detail
   const [datasetId, setDatasetId] = useState<string | undefined>(undefined)
   const [data, setData] = useState<PathCheckResponse | null>(null)
@@ -25,11 +30,11 @@ export function PathCheck({ detail, onError }: Props) {
     let current = true
     setLoading(true)
     api.pathCheck(scenario.id, datasetId)
-      .then((res) => current && setData(res))
+      .then((res) => { if (current) { setData(res); onResult?.(res.evaluation.outcome) } })
       .catch((e: unknown) => current && onError(getError(e)))
       .finally(() => current && setLoading(false))
     return () => { current = false }
-  }, [scenario.id, scenario.marketRef, datasetId, onError])
+  }, [scenario.id, scenario.marketRef, datasetId, onError, onResult])
 
   if (!scenario.marketRef) {
     return (

@@ -161,12 +161,13 @@ export function MarketPanel() {
       {datasets.length > 1 && (
         <div className="dataset-list">
           <h3>取込履歴</h3>
-          <div className="table-wrap"><table>
-            <thead><tr><th>出典</th><th>時間足</th><th>期間</th><th>本数</th><th>取込</th></tr></thead>
+          <div className="table-wrap"><table className="responsive" data-testid="dataset-table">
+            <thead><tr><th>出典</th><th>時間足</th><th>期間</th><th>TZ</th><th>本数</th><th>取込</th></tr></thead>
             <tbody>{datasets.map((d) => (
               <tr key={d.id} className={active?.id === d.id ? 'selected' : ''} onClick={() => void open(d.id)}>
-                <td><button className="link-button" type="button">{d.sourceName}</button></td><td>{d.timeframe}</td>
-                <td>{d.firstDate} → {d.lastDate}</td><td>{d.candleCount}</td><td>{timestamp(d.importedAt)}</td>
+                <td data-label="出典"><button className="link-button" type="button">{d.sourceName}</button></td><td data-label="時間足">{d.timeframe}</td>
+                <td data-label="期間">{d.firstDate} → {d.lastDate}</td><td data-label="TZ">{d.tzOffset ? `UTC${d.tzOffset}` : '未指定'}</td>
+                <td data-label="本数">{d.candleCount}</td><td data-label="取込">{timestamp(d.importedAt)}</td>
               </tr>
             ))}</tbody>
           </table></div>
