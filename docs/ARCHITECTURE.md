@@ -25,17 +25,18 @@ User-initiated Copy -> official AI website -> user pastes answer -> TradeCourt
 | `GET /api/scenarios/:id` | Scenario + reviews + paper outcome. 404 if missing. |
 | `POST /api/scenarios/:id/reviews` | Manual paste: `provider`, `role` (BULL/BEAR), `content`, optional `respondedAt` (not in the future). Idempotency-Key supported. |
 | `POST /api/scenarios/:id/paper-outcome` | `exitPrice`, `exitReason` (TARGET/STOP/INVALIDATED/MANUAL), `followedPlan`, `note`. Exactly one per scenario; repeat → 409. |
-| `GET /api/journal` | All scenarios with review counts and paper outcomes + summary (`kind: "paper"`). |
+| `PUT /api/scenarios/:id/reviews/:reviewId/grade` | Post-hoc grading: `verdict` (HIT/MISS/UNCLEAR), optional `note`. 409 until the scenario has a paper outcome; 404 if the review belongs to another scenario. Re-grading overwrites (the user's judgment), the paper outcome stays immutable. |
+| `GET /api/journal` | All scenarios with review/graded counts and paper outcomes + summary + `scorecard` (per AI × role hit rate, awaiting grade, losses warned by BEAR) (`kind: "paper"`). |
 | `GET/POST /api/market/datasets`, `GET /api/market/datasets/:id` | Imported OHLC snapshots (≤5,000 candles, ascending, consistent OHLC), served with computed stats and `verified: false`. |
 
 Errors are JSON `{ error, issues? }`: 400 invalid/malformed, 403 non-loopback Host or cross-origin write, 404, 409, 413 body too large, 415 non-JSON write, 500 generic (details only in local logs).
 
 ## Persistence
 - `scenarios`: immutable price snapshot, thesis and invalidation point. No edit in MVP.
-- `reviews`: manually pasted AI response, attributed provider, argument role and user-declared answer time; not market evidence.
+- `reviews`: manually pasted AI response, attributed provider, argument role and user-declared answer time; not market evidence. `verdict` / `verdict_note` / `graded_at` hold the user's post-hoc grade (NULL = ungraded).
 - `paper_outcomes`: one user-entered hypothetical close per scenario (exit reason, rule adherence), never a broker fill.
 - `market_datasets`: user-imported CSV snapshot (source file name, note, period, candles JSON). Not live, not verified.
-- Migrations are additive: `0001_init.sql`, `0002_mvp_review_journal_market.sql`.
+- Database: SQLite via local D1 (Wrangler stores it under `apps/api/.wrangler/state`). Migrations are additive: `0001_init.sql`, `0002_mvp_review_journal_market.sql`, `0003_review_grading.sql`.
 
 Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wrangler/` (gitignored). The configured D1 ID is a **local-only placeholder**. Do not provision or deploy a remote D1 until a separate security/release gate.
 
