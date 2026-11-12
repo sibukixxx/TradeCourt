@@ -64,6 +64,13 @@ describe('pure trade math and prompt boundaries', () => {
     expect(bull).not.toEqual(bear)
     expect(bull).toContain('リアルタイム価格')
   })
+
+  it('mentions the as-of candle only when the scenario is linked to imported data', () => {
+    expect(buildReviewPrompt(long, 'BEAR')).not.toContain('仮説時点')
+    const linked = buildReviewPrompt({ ...long, marketRef: { asOfDate: '2026-01-06' } }, 'BEAR')
+    expect(linked).toContain('仮説時点: 2026-01-06')
+    expect(linked).toContain('最新相場ではありません')
+  })
 })
 
 describe('review and outcome contracts', () => {
