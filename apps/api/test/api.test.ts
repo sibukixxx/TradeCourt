@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import app from '../src/index'
-import { createTestD1 } from './d1-sqlite'
+import { REQUIRED_MIGRATION } from '../src/schema'
+import { createTestD1, migrationFiles } from './d1-sqlite'
 
 // All data here is SYNTHETIC test data. No external AI, broker or Cloudflare call is made.
 let env: { DB: D1Database }
@@ -34,6 +35,24 @@ describe('health and setup', () => {
     expect((await call('/api/health')).data).toMatchObject({ status: 'ok', liveMarketData: false, orderExecution: false })
     env = { DB: createTestD1({ migrate: false }).d1 }
     expect((await call('/api/health')).status).toBe(503)
+  })
+
+  it('entry module exports only the Worker handler (workerd rejects other named exports)', async () => {
+    expect(Object.keys(await import('../src/index'))).toEqual(['default'])
+  })
+
+  it('requires the latest migration file (keeps REQUIRED_MIGRATION in sync)', () => {
+    expect(REQUIRED_MIGRATION).toBe(migrationFiles().at(-1))
+  })
+
+  it('reports pending migrations instead of failing later with "no such column"', async () => {
+    const { d1, raw } = createTestD1()
+    raw.prepare('DELETE FROM d1_migrations WHERE name = ?').run(REQUIRED_MIGRATION)
+    env = { DB: d1 }
+    const { status, data } = await call('/api/health')
+    expect(status).toBe(503)
+    expect(data).toMatchObject({ status: 'setup_required', requiredMigration: REQUIRED_MIGRATION })
+    expect(data.error).toMatch(/make migrate/)
   })
 })
 
