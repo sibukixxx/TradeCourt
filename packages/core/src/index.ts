@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+export * from './market'
+
 const positivePrice = z.number().finite().positive()
 
 export const scenarioInputSchema = z.object({
@@ -24,14 +26,23 @@ export const scenarioInputSchema = z.object({
   }
 })
 
+export const providerSchema = z.enum(['chatgpt', 'claude', 'gemini', 'grok', 'other'])
+export const roleSchema = z.enum(['BULL', 'BEAR'])
+
 export const reviewInputSchema = z.object({
-  provider: z.enum(['chatgpt', 'claude', 'gemini', 'grok', 'other']),
-  role: z.enum(['BULL', 'BEAR']),
+  provider: providerSchema,
+  role: roleSchema,
   content: z.string().trim().min(10).max(20000),
+  /** When the user received the answer on the external AI site (user-declared). Defaults to save time. */
+  respondedAt: z.iso.datetime({ offset: true }).optional(),
 }).strict()
+
+export const exitReasonSchema = z.enum(['TARGET', 'STOP', 'INVALIDATED', 'MANUAL'])
 
 export const paperOutcomeInputSchema = z.object({
   exitPrice: positivePrice,
+  exitReason: exitReasonSchema.default('MANUAL'),
+  followedPlan: z.boolean().default(true),
   note: z.string().trim().max(2000).default(''),
 }).strict()
 
@@ -45,24 +56,50 @@ export type Scenario = ScenarioInput & {
   riskReward: number
 }
 
-export type Review = ReviewInput & {
+export type Provider = z.infer<typeof providerSchema>
+export type Role = z.infer<typeof roleSchema>
+export type ExitReason = z.infer<typeof exitReasonSchema>
+
+export type Review = {
   id: string
   scenarioId: string
+  provider: Provider
+  role: Role
+  content: string
+  /** User-declared time the external AI answered; falls back to createdAt. */
+  respondedAt: string
+  /** Time TradeCourt stored the manual paste. */
   createdAt: string
+  /** Reviews only ever enter TradeCourt by manual paste; never fetched from an AI service. */
+  source: 'manual_paste'
 }
 
 export type PaperOutcome = {
   scenarioId: string
   exitPrice: number
   rMultiple: number
+  exitReason: ExitReason
+  followedPlan: boolean
   note: string
   recordedAt: string
+  /** Always 'paper': user-entered hypothetical close, never a broker fill. */
+  kind: 'paper'
+}
+
+export type JournalEntry = {
+  scenario: Scenario
+  reviewCounts: { total: number; bull: number; bear: number; providers: Provider[] }
+  outcome: PaperOutcome | null
 }
 
 export type ScenarioDetail = {
   scenario: Scenario
   reviews: Review[]
   outcome: PaperOutcome | null
+}
+
+export const providerLabels: Record<Provider, string> = {
+  chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini', grok: 'Grok', other: 'Other',
 }
 
 export const aiProviders = {
@@ -88,6 +125,67 @@ export function calculatePaperRMultiple(
   }
   const move = s.side === 'LONG' ? exitPrice - s.entry : s.entry - exitPrice
   return Number((move / risk).toFixed(3))
+}
+
+export type PlanComparison = {
+  plannedRewardR: number
+  realizedR: number
+  /** realizedR / plannedRewardR, e.g. 0.5 = half of the planned reward captured. */
+  captureRatio: number
+  zone: 'BEYOND_TARGET' | 'AT_TARGET' | 'BETWEEN' | 'AT_STOP' | 'BEYOND_STOP'
+  lossExceededPlan: boolean
+}
+
+export function comparePlanToOutcome(
+  s: Pick<ScenarioInput, 'entry' | 'stop' | 'target' | 'side'>,
+  exitPrice: number,
+): PlanComparison {
+  const plannedRewardR = calculateRiskReward(s)
+  const realizedR = calculatePaperRMultiple(s, exitPrice)
+  const eps = 1e-9
+  let zone: PlanComparison['zone']
+  if (Math.abs(realizedR - plannedRewardR) < 1e-6) zone = 'AT_TARGET'
+  else if (realizedR > plannedRewardR + eps) zone = 'BEYOND_TARGET'
+  else if (Math.abs(realizedR + 1) < 1e-6) zone = 'AT_STOP'
+  else if (realizedR < -1 - eps) zone = 'BEYOND_STOP'
+  else zone = 'BETWEEN'
+  return {
+    plannedRewardR,
+    realizedR,
+    captureRatio: Number((realizedR / plannedRewardR).toFixed(3)),
+    zone,
+    lossExceededPlan: zone === 'BEYOND_STOP',
+  }
+}
+
+export type JournalSummary = {
+  scenarios: number
+  closed: number
+  open: number
+  wins: number
+  losses: number
+  breakeven: number
+  totalR: number
+  averageR: number | null
+  followedPlanRate: number | null
+}
+
+export function summarizeJournal(entries: Pick<JournalEntry, 'outcome'>[]): JournalSummary {
+  const closed = entries.flatMap((e) => (e.outcome ? [e.outcome] : []))
+  const totalR = Number(closed.reduce((sum, o) => sum + o.rMultiple, 0).toFixed(3))
+  return {
+    scenarios: entries.length,
+    closed: closed.length,
+    open: entries.length - closed.length,
+    wins: closed.filter((o) => o.rMultiple > 0).length,
+    losses: closed.filter((o) => o.rMultiple < 0).length,
+    breakeven: closed.filter((o) => o.rMultiple === 0).length,
+    totalR,
+    averageR: closed.length ? Number((totalR / closed.length).toFixed(3)) : null,
+    followedPlanRate: closed.length
+      ? Number((closed.filter((o) => o.followedPlan).length / closed.length).toFixed(3))
+      : null,
+  }
 }
 
 export function buildReviewPrompt(scenario: ScenarioInput, role: 'BULL' | 'BEAR'): string {
