@@ -5,7 +5,9 @@ import {
   calculateRiskReward,
   candleCloseTime,
   candleTime,
+  analyzeDecisions,
   evaluatePath,
+  toCsv,
   marketDatasetInputSchema,
   paperOutcomeInputSchema,
   reviewGradeInputSchema,
@@ -19,6 +21,8 @@ import {
   type JournalResponse,
   type ReviewScoreRow,
   type Verdict,
+  type AnalysisEntry,
+  type PathEvaluation,
   type MarketDataset,
   type MarketDatasetMeta,
   type MarketRef,
@@ -491,6 +495,129 @@ app.get('/api/journal', async (c) => {
     kind: 'paper',
   }
   return c.json(body)
+})
+
+// ---- Shared loaders for analysis / export --------------------------------------------------
+type FullState = {
+  scenarios: Scenario[]
+  reviews: Review[]
+  outcomes: Map<string, PaperOutcome>
+  datasets: DatasetRow[]
+  /** Default reference path check per linked scenario (newest dataset with later candles). */
+  paths: Map<string, { datasetId: string; evaluation: PathEvaluation }>
+}
+
+async function loadFullState(db: D1Database): Promise<FullState> {
+  const [scenarios, reviews, outcomes, datasets] = await Promise.all([
+    db.prepare('SELECT * FROM scenarios ORDER BY created_at ASC, id ASC').all<ScenarioRow>(),
+    db.prepare('SELECT * FROM reviews ORDER BY created_at ASC, id ASC').all<ReviewRow>(),
+    db.prepare('SELECT * FROM paper_outcomes').all<OutcomeRow>(),
+    db.prepare(
+      `SELECT id,symbol,timeframe,source_name,source_note,candle_count,first_date,last_date,imported_at,tz_offset
+         FROM market_datasets ORDER BY imported_at DESC, id DESC`,
+    ).all<DatasetRow>(),
+  ])
+  const state: FullState = {
+    scenarios: scenarios.results.map(scenarioDto),
+    reviews: reviews.results.map(reviewDto),
+    outcomes: new Map(outcomes.results.map((o) => [o.scenario_id, outcomeDto(o)])),
+    datasets: datasets.results,
+    paths: new Map(),
+  }
+  const candleCache = new Map<string, { row: DatasetRow; candles: Candle[] }>()
+  const loadCandles = async (id: string) => {
+    if (!candleCache.has(id)) {
+      const row = await db.prepare('SELECT * FROM market_datasets WHERE id = ?').bind(id).first<DatasetRow>()
+      if (!row) return null
+      candleCache.set(id, { row, candles: JSON.parse(row.candles_json ?? '[]') as Candle[] })
+    }
+    return candleCache.get(id) ?? null
+  }
+  for (const s of state.scenarios) {
+    if (!s.marketRef) continue
+    const asOf = Date.parse(s.marketRef.asOfAt)
+    const chosen = state.datasets.find((d) => d.symbol === s.symbol && candleTime(d.last_date, d.tz_offset ?? '+00:00') >= asOf)?.id
+      ?? s.marketRef.datasetId
+    const ds = await loadCandles(chosen)
+    if (ds) state.paths.set(s.id, { datasetId: ds.row.id, evaluation: evaluatePath(s, ds.candles, ds.row.tz_offset, asOf) })
+  }
+  return state
+}
+
+// ---- Decision analysis (paper records only) -------------------------------------------------
+app.get('/api/analysis', async (c) => {
+  const raw = c.req.query('limit')
+  let limit: number | null = null
+  if (raw !== undefined && raw !== 'all') {
+    limit = Number(raw)
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return c.json({ error: 'limit must be an integer 1-1000 or "all"' }, 400)
+  }
+  const state = await loadFullState(c.env.DB)
+  const entries: AnalysisEntry[] = state.scenarios.map((s) => {
+    const o = state.outcomes.get(s.id)
+    const p = state.paths.get(s.id)
+    return {
+      scenario: { id: s.id, createdAt: s.createdAt, side: s.side, riskReward: s.riskReward },
+      outcome: o ? { rMultiple: o.rMultiple, exitReason: o.exitReason, followedPlan: o.followedPlan, recordedAt: o.recordedAt } : null,
+      path: p ? { outcome: p.evaluation.outcome, referenceR: p.evaluation.referenceR } : null,
+    }
+  })
+  return c.json({ analysis: analyzeDecisions(entries, limit), kind: 'paper' })
+})
+
+// ---- Export (user's own local data; paper records, not broker fills) --------------------------
+const EXPORT_NOTICE = 'TradeCourt local export. Outcomes are user-entered PAPER records (not broker fills); AI reviews are manually pasted opinions; path checks are references computed from user-imported, unverified CSV.'
+
+app.get('/api/export', async (c) => {
+  const format = c.req.query('format') ?? 'json'
+  if (format !== 'json' && format !== 'csv') return c.json({ error: 'format must be json or csv' }, 400)
+  const state = await loadFullState(c.env.DB)
+  const stamp = new Date().toISOString()
+  const fileStamp = stamp.slice(0, 19).replace(/[:T]/g, '-')
+  c.header('Cache-Control', 'no-store')
+
+  if (format === 'json') {
+    const body = {
+      exportedAt: stamp,
+      kind: 'paper',
+      notice: EXPORT_NOTICE,
+      datasets: state.datasets.map(datasetMeta),
+      scenarios: state.scenarios.map((s) => ({
+        scenario: s,
+        reviews: state.reviews.filter((r) => r.scenarioId === s.id),
+        outcome: state.outcomes.get(s.id) ?? null,
+        pathReference: state.paths.get(s.id) ?? null,
+      })),
+    }
+    c.header('Content-Disposition', `attachment; filename="tradecourt-export-${fileStamp}.json"`)
+    return c.body(JSON.stringify(body, null, 2), 200, { 'Content-Type': 'application/json; charset=utf-8' })
+  }
+
+  const header = [
+    'scenario_id', 'created_at', 'symbol', 'timeframe', 'side', 'entry', 'stop', 'target', 'planned_rr',
+    'thesis', 'invalidation', 'as_of_candle', 'as_of_at',
+    'reviews_total', 'reviews_bull', 'reviews_bear', 'graded_hit', 'graded_miss', 'graded_unclear',
+    'paper_exit_price', 'paper_r', 'exit_reason', 'followed_plan', 'reflection', 'recorded_at',
+    'path_outcome', 'path_reference_r', 'path_decided_candle', 'data_kind',
+  ]
+  const rows = state.scenarios.map((s) => {
+    const rv = state.reviews.filter((r) => r.scenarioId === s.id)
+    const o = state.outcomes.get(s.id)
+    const p = state.paths.get(s.id)?.evaluation
+    const count = (pred: (r: Review) => boolean) => rv.filter(pred).length
+    return [
+      s.id, s.createdAt, s.symbol, s.timeframe, s.side, s.entry, s.stop, s.target, s.riskReward,
+      s.thesis, s.invalidation, s.marketRef?.asOfDate, s.marketRef?.asOfAt,
+      rv.length, count((r) => r.role === 'BULL'), count((r) => r.role === 'BEAR'),
+      count((r) => r.grade?.verdict === 'HIT'), count((r) => r.grade?.verdict === 'MISS'), count((r) => r.grade?.verdict === 'UNCLEAR'),
+      o?.exitPrice, o?.rMultiple, o?.exitReason, o ? o.followedPlan : null, o?.note, o?.recordedAt,
+      p?.outcome, p?.referenceR, p?.outcome === 'OPEN' ? null : p?.decidedDate,
+      'paper (user-entered, not broker fills)',
+    ]
+  })
+  c.header('Content-Disposition', `attachment; filename="tradecourt-export-${fileStamp}.csv"`)
+  // UTF-8 BOM so spreadsheet apps (e.g. Excel) read Japanese text correctly.
+  return c.body('\uFEFF' + toCsv([header, ...rows]), 200, { 'Content-Type': 'text/csv; charset=utf-8' })
 })
 
 // ---- Market datasets (imported CSV snapshots) ---------------------------------------------

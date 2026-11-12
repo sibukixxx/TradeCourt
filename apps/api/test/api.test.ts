@@ -366,3 +366,79 @@ describe('market link and path check (synthetic candles)', () => {
     expect((await call(`/api/scenarios/${linkedId}/path-check?datasetId=missing`)).status).toBe(404)
   })
 })
+
+describe('decision analysis and export', () => {
+  async function seed() {
+    // Synthetic: linked LONG (entry 150 / stop 149 / target 152) whose CSV hits the target first,
+    // closed early at +0.5R; plus an unlinked scenario closed at -1R that deviated from the plan.
+    const ds = (await call('/api/market/datasets', { body: { symbol: 'USDJPY', timeframe: '1d', sourceName: 'synthetic.csv', tzOffset: '+00:00', candles: [
+      { date: '2026-03-02', open: 149.8, high: 150.2, low: 149.7, close: 150.0 },
+      { date: '2026-03-03', open: 150.0, high: 152.3, low: 149.6, close: 152.1 },
+    ] } })).data.dataset
+    const linked = (await createScenario({ entry: 150, stop: 149, target: 152, thesis: '=HYPERLINK("http://evil") synthetic thesis', marketRef: { datasetId: ds.id, asOfDate: '2026-03-02' } })).data.scenario
+    await call(`/api/scenarios/${linked.id}/reviews`, { body: { provider: 'claude', role: 'BULL', content: 'Synthetic bull, "quoted", with comma' } })
+    await call(`/api/scenarios/${linked.id}/paper-outcome`, { body: { exitPrice: 150.5, exitReason: 'MANUAL', note: 'Synthetic early exit\nsecond line' } })
+    const plain = (await createScenario()).data.scenario
+    await call(`/api/scenarios/${plain.id}/paper-outcome`, { body: { exitPrice: 149.6, exitReason: 'STOP', followedPlan: false } })
+    await createScenario() // open, no outcome
+    return { linked, plain }
+  }
+
+  it('aggregates paper outcomes and compares them with the reference path', async () => {
+    await seed()
+    const { status, data } = await call('/api/analysis')
+    expect(status).toBe(200)
+    expect(data.kind).toBe('paper')
+    const a = data.analysis
+    expect(a.window).toMatchObject({ requested: null, closed: 2, scenarios: 3 })
+    expect(a.overview).toMatchObject({ count: 2, totalR: -0.5, averageR: -0.25, winRate: 0.5 })
+    expect(a.byPlan.deviated).toMatchObject({ count: 1, totalR: -1 })
+    expect(a.pathComparison).toMatchObject({ compared: 1, missedTarget: { count: 1, totalR: 1.5 }, excluded: { unlinked: 1 } })
+    expect(a.equity.map((p: any) => p.cumulativeR)).toEqual([0.5, -0.5])
+  })
+
+  it('validates the limit parameter', async () => {
+    await seed()
+    expect((await call('/api/analysis?limit=1')).data.analysis.window.closed).toBe(1)
+    expect((await call('/api/analysis?limit=all')).data.analysis.window.closed).toBe(2)
+    expect((await call('/api/analysis?limit=0')).status).toBe(400)
+    expect((await call('/api/analysis?limit=abc')).status).toBe(400)
+  })
+
+  it('exports JSON with notice, grades, outcomes and path references', async () => {
+    const { linked } = await seed()
+    const res = await app.request(`${base}/api/export?format=json`, {}, env)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Disposition')).toMatch(/attachment; filename="tradecourt-export-.*\.json"/)
+    const body = await res.json() as any
+    expect(body.kind).toBe('paper')
+    expect(body.notice).toMatch(/not broker fills/)
+    expect(body.datasets[0]).not.toHaveProperty('candles')
+    const item = body.scenarios.find((x: any) => x.scenario.id === linked.id)
+    expect(item.reviews).toHaveLength(1)
+    expect(item.outcome.rMultiple).toBe(0.5)
+    expect(item.pathReference.evaluation.outcome).toBe('TARGET_FIRST')
+  })
+
+  it('exports CSV with BOM, escaping and formula-injection guard', async () => {
+    await seed()
+    const res = await app.request(`${base}/api/export?format=csv`, {}, env)
+    expect(res.headers.get('Content-Type')).toMatch(/text\/csv/)
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]) // UTF-8 BOM (text() would strip it)
+    const text = new TextDecoder().decode(bytes)
+    const lines = text.split('\r\n')
+    expect(lines[0].startsWith('scenario_id,created_at,')).toBe(true)
+    expect(text).toContain(`"'=HYPERLINK(""http://evil"") synthetic thesis"`)
+    expect(text).toContain('"Synthetic early exit\nsecond line"')
+    expect(text).toContain('TARGET_FIRST,2,2026-03-03,"paper (user-entered, not broker fills)"')
+    expect(text.trim().split('\r\n')).toHaveLength(4) // header + 3 scenarios
+    expect((await call('/api/export?format=xml')).status).toBe(400)
+  })
+
+  it('works on an empty database', async () => {
+    expect((await call('/api/analysis')).data.analysis.overview.count).toBe(0)
+    const res = await app.request(`${base}/api/export?format=csv`, {}, env)
+    expect((await res.text()).trim().split('\r\n')).toHaveLength(1)
+  })
+})
