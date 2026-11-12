@@ -20,6 +20,6 @@ pnpm dev
 ```
 Visit `http://127.0.0.1:5173`. API health: `http://127.0.0.1:8787/api/health`.
 
-Run `pnpm test && pnpm typecheck && pnpm build` after installing dependencies. See `docs/ARCHITECTURE.md` and `AGENTS.md` for boundaries.
+Run `pnpm test && pnpm typecheck && pnpm build` after installing dependencies. While `pnpm dev` is running in another terminal, run `pnpm smoke:local` to check the real local API; it writes **synthetic** records to local D1. See `docs/ARCHITECTURE.md` and `AGENTS.md` for boundaries.
 
 **Security:** Local development only. No authentication is implemented. Do **not** deploy this API publicly until authentication, access controls, origin protection, data backup and secret-handling are in place. There is intentionally no deployment script or GitHub Actions workflow.
