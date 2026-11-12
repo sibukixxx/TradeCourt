@@ -9,6 +9,7 @@ import {
 } from '@tradecourt/core'
 import { api, newRequestKey } from '../api'
 import { getError, localDateTimeNow, price, timestamp } from '../format'
+import { VerdictBadge } from './ReviewGrading'
 
 type ProviderKey = keyof typeof aiProviders
 const providerKeys = Object.keys(aiProviders) as ProviderKey[]
@@ -31,6 +32,7 @@ function ReviewCard({ review }: { review: Review }) {
       </div>
       <p>{review.content}</p>
       <small>回答日時 {timestamp(review.respondedAt)} · 保存 {timestamp(review.createdAt)} · 手動貼付（未検証の意見）</small>
+      {review.grade && <div className="card-verdict">答え合わせ: <VerdictBadge verdict={review.grade.verdict} />{review.grade.note && <span className="muted"> {review.grade.note}</span>}</div>}
     </article>
   )
 }

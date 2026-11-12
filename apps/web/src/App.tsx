@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { JournalEntry, JournalSummary, Scenario, ScenarioDetail } from '@tradecourt/core'
+import type { JournalResponse, Scenario, ScenarioDetail } from '@tradecourt/core'
 import { api } from './api'
-import { getError, price } from './format'
+import { getError, price, timestamp } from './format'
 import { MarketPanel } from './panels/MarketPanel'
 import { ScenarioPanel } from './panels/ScenarioPanel'
 import { CourtPanel } from './panels/CourtPanel'
@@ -32,7 +32,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(initial.id)
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [detail, setDetail] = useState<ScenarioDetail | null>(null)
-  const [journal, setJournal] = useState<{ entries: JournalEntry[]; summary: JournalSummary } | null>(null)
+  const [journal, setJournal] = useState<JournalResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [ready, setReady] = useState<boolean | null>(null)
@@ -112,6 +112,9 @@ export default function App() {
   }
 
   const selected = detail?.scenario
+  // Show a loading state only while switching scenarios; refreshing the same scenario after a
+  // write keeps the current view mounted (no flash, no scroll jump on phones).
+  const switching = detailLoading && detail?.scenario.id !== selectedId
 
   return (
     <div className="app-shell">
@@ -154,6 +157,17 @@ export default function App() {
         {error && <div role="alert" className="alert error"><strong>確認が必要です</strong><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="閉じる">×</button></div>}
         {notice && <div role="status" className="alert success"><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label="閉じる">×</button></div>}
 
+        {(page === 'court' || page === 'journal') && scenarios.length > 0 && (
+          <label className="scenario-picker mobile-only">
+            対象シナリオ
+            <select data-testid="mobile-scenario-picker" value={selectedId ?? ''} onChange={(e) => void openScenario(e.target.value, page)}>
+              {scenarios.map((s) => (
+                <option key={s.id} value={s.id}>{s.side} {s.timeframe} · {price(s.entry)}→{price(s.target)} · {timestamp(s.createdAt)}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
         {page === 'market' && <MarketPanel />}
         {page === 'scenario' && (
           <ScenarioPanel
@@ -169,7 +183,7 @@ export default function App() {
           />
         )}
         {page === 'court' && (
-          <CourtPanel detail={detail} loading={loading || detailLoading} onSaved={afterWrite} onError={showError} onNotice={showNotice} />
+          <CourtPanel detail={detail} loading={loading || switching} onSaved={afterWrite} onError={showError} onNotice={showNotice} />
         )}
         {page === 'journal' && (
           <JournalPanel
@@ -177,7 +191,8 @@ export default function App() {
             detail={detail}
             entries={journal?.entries ?? []}
             summary={journal?.summary ?? null}
-            loading={loading || detailLoading}
+            scorecard={journal?.scorecard ?? null}
+            loading={loading || switching}
             onSaved={afterWrite}
             onOpen={(id) => void openScenario(id, 'journal')}
             onError={showError}

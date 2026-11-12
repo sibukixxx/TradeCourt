@@ -1,12 +1,12 @@
 import type {
-  JournalEntry,
-  JournalSummary,
+  JournalResponse,
   MarketDataset,
   MarketDatasetInput,
   MarketDatasetMeta,
   PaperOutcome,
   PaperOutcomeInput,
   Review,
+  ReviewGradeInput,
   ReviewInput,
   Scenario,
   ScenarioDetail,
@@ -64,7 +64,11 @@ export const api = {
     `/api/scenarios/${encodeURIComponent(id)}/paper-outcome`,
     { method: 'POST', body: JSON.stringify(input) },
   ),
-  journal: () => request<{ entries: JournalEntry[]; summary: JournalSummary }>('/api/journal'),
+  gradeReview: (scenarioId: string, reviewId: string, input: ReviewGradeInput) => request<{ review: Review }>(
+    `/api/scenarios/${encodeURIComponent(scenarioId)}/reviews/${encodeURIComponent(reviewId)}/grade`,
+    { method: 'PUT', body: JSON.stringify(input) },
+  ),
+  journal: () => request<JournalResponse>('/api/journal'),
   datasets: () => request<{ datasets: MarketDatasetMeta[] }>('/api/market/datasets'),
   dataset: (id: string) => request<{ dataset: MarketDataset }>(`/api/market/datasets/${encodeURIComponent(id)}`),
   importDataset: (input: MarketDatasetInput, idempotencyKey: string) => request<{ dataset: MarketDataset }>(
