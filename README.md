@@ -14,6 +14,9 @@ A local-first **trade-decision review workspace**. Record a hypothetical USD/JPY
 | **02 Scenario** | LONG/SHORT, 1h/4h/1d, Entry/Stop/Target with live R:R and direction check, entry thesis and invalidation condition. Saved scenarios are immutable and listed. |
 | **03 AI Court** | Generates BULL (賛成) / BEAR (反対) prompts from the saved scenario, one-click copy, opens the official ChatGPT / Claude / Gemini / Grok site in a new tab. You paste the answer back; provider, role, answer time and save time are stored. BULL vs BEAR side-by-side comparison and provider × role matrix. Pasted text is rendered as plain text (never HTML). |
 | **04 Journal** | Shows the scenario snapshot and its AI reviews, records one immutable paper exit (price, exit reason, rule adherence, reflection), computes the R multiple, compares plan vs. actual decision, and lists the full decision history with paper-only summary stats. |
+| **答え合わせ (in Journal)** | After the paper exit is recorded, grade each pasted AI review as 的中 / 外れ / 判定不能 with an optional note (suggestion: profit → BULL hit, loss → BEAR hit; you decide, and can re-grade). A scorecard shows hit rate per AI × BULL/BEAR (判定不能 excluded), reviews awaiting a grade, and losses where a BEAR warning was graded a hit. Grades are your own judgment against paper results, not market verification. |
+
+**Phone UI (≤760px):** bottom tab bar (safe-area aware), scenario picker on AI Court / Journal, tables shown as stacked cards, 44px touch targets, 16px inputs (no iOS zoom on focus), sticky success/error messages.
 
 ## Quick start (Node 22+, pnpm via corepack)
 
@@ -31,7 +34,7 @@ corepack pnpm dev
 
 | Command | Purpose |
 | --- | --- |
-| `corepack pnpm test` | Vitest: `packages/core` (schemas, R:R, R multiple, prompts, CSV parsing/stats) and `apps/api` (all routes against the real migrations on an in-memory `node:sqlite` D1 shim: validation, 400/404/409/413/415/403, idempotency, journal, market). |
+| `corepack pnpm test` | Vitest: `packages/core` (schemas, R:R, R multiple, prompts, CSV parsing/stats, grading suggestion/scorecard) and `apps/api` (all routes against the real migrations on an in-memory `node:sqlite` D1 shim: validation, 400/404/409/413/415/403, idempotency, grading, journal, market). |
 | `corepack pnpm typecheck` | `tsc --noEmit` for all packages. |
 | `corepack pnpm build` | Production build of the web app. |
 | `corepack pnpm db:migrate:local` | Apply D1 migrations to the **local** database only. |
@@ -42,21 +45,21 @@ The browser E2E blocks and fails on any non-loopback request. It checks external
 
 ## Verification results
 
-Executed in a Linux cloud container on 2026-11-12 (Node v22.23.4, pnpm 10.23.0 via corepack 0.36.0, wrangler 4.160.1, Chromium via Playwright 1.63.0). The exact Git SHA is recorded in the pull request.
+Latest run: 2026-11-12, Linux cloud container (Node v22.23.4, pnpm 10.23.0 via corepack 0.36.0, wrangler 4.160.1, Chromium via Playwright 1.63.0). The exact Git SHA is recorded in the pull request.
 
 | Check | Result |
 | --- | --- |
 | `pnpm install --frozen-lockfile` (fresh `node_modules`) | PASS |
-| `pnpm test` — core 22 tests, api 21 tests | PASS |
-| `pnpm typecheck` | PASS |
-| `pnpm build` | PASS |
-| `pnpm db:migrate:local` (0001, 0002) | PASS |
+| `pnpm test` — core 27 tests, api 26 tests | PASS |
+| `pnpm typecheck` / `pnpm build` | PASS |
+| `pnpm db:migrate:local` — 0003 applied on top of an already populated local DB; existing rows intact (ungraded) | PASS |
 | `pnpm dev` → `GET /api/health` on :8787 and via :5173 proxy | PASS |
-| `pnpm smoke:local` | PASS |
-| `pnpm test:e2e` isolated, 12 steps (CSV import + rejection, scenario + R:R, BULL/BEAR prompt + clipboard copy, official links, 2 pasted synthetic reviews compared, HTML not executed, paper exit + R multiple, API error paths, reload persistence, mobile 390px for 4 screens, zero external requests) | PASS 12/12 |
-| Same E2E against running `pnpm dev` (:5173/:8787, real local D1) | PASS 12/12 |
-| Data persists after stopping and restarting `pnpm dev` | PASS |
+| `pnpm smoke:local` (incl. grading 409 before outcome, 400 bad verdict, persistence) | PASS |
+| `pnpm test:e2e` isolated, 14 steps (previous 12 + 答え合わせ on desktop + phone 390×844 touch flow: bottom tab bar stays pinned, scenario picker, tap grading, sticky message, card tables, no horizontal overflow) | PASS 14/14 |
+| Same E2E against running `pnpm dev` (:5173/:8787, real local D1) | PASS 14/14 |
+| Grades and all data persist after stopping and restarting `pnpm dev` | PASS |
 | Logging into / sending prompts to real ChatGPT, Claude, Gemini, Grok | **NOT RUN** (intentionally manual; not automatable by policy) |
+| Real phone hardware (iOS Safari / Android Chrome) | **NOT RUN** (emulated 390×844 touch viewport in Chromium only) |
 | Owner's own workstation (macOS/Windows) fresh clone | **NOT RUN** here |
 
 ## Security

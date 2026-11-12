@@ -16,7 +16,9 @@
 - [ ] Deterministic multi-timeframe trend / support/resistance, with parameterized rebounce definitions.
 - [ ] Immutable scenario and candle snapshot hashing; no look-ahead bias.
 - [x] Plan vs user-entered paper outcome comparison and basic journal summary (wins/losses, total/avg R, rule adherence).
-- [ ] Review quality metrics (which AI argument proved right) and limitations.
+- [x] Review quality metrics: post-hoc grading of each AI review (的中/外れ/判定不能) and per AI × BULL/BEAR hit-rate scorecard.
+- [x] Phone UI: bottom tab bar, scenario picker, card tables, touch targets.
+- [ ] Data export / backup (JSON/CSV) of the local database.
 
 ## P2 — use outside localhost
 - [ ] Security review (auth, access, per-user isolation, CORS/CSRF and data retention).

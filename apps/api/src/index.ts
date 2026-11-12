@@ -5,12 +5,17 @@ import {
   calculateRiskReward,
   marketDatasetInputSchema,
   paperOutcomeInputSchema,
+  reviewGradeInputSchema,
   reviewInputSchema,
   scenarioInputSchema,
   summarizeCandles,
   summarizeJournal,
+  summarizeReviewGrades,
   type Candle,
   type JournalEntry,
+  type JournalResponse,
+  type ReviewScoreRow,
+  type Verdict,
   type MarketDataset,
   type MarketDatasetMeta,
   type PaperOutcome,
@@ -44,6 +49,9 @@ type ReviewRow = {
   content: string
   responded_at: string | null
   created_at: string
+  verdict: Verdict | null
+  verdict_note: string
+  graded_at: string | null
 }
 type OutcomeRow = {
   scenario_id: string
@@ -89,6 +97,7 @@ const reviewDto = (r: ReviewRow): Review => ({
   respondedAt: r.responded_at ?? r.created_at,
   createdAt: r.created_at,
   source: 'manual_paste',
+  grade: r.verdict && r.graded_at ? { verdict: r.verdict, note: r.verdict_note, gradedAt: r.graded_at } : null,
 })
 const outcomeDto = (r: OutcomeRow): PaperOutcome => ({
   scenarioId: r.scenario_id,
@@ -270,6 +279,7 @@ app.post('/api/scenarios/:id/reviews', async (c) => {
     respondedAt,
     createdAt,
     source: 'manual_paste',
+    grade: null,
   }
   try {
     await c.env.DB.prepare(
@@ -322,6 +332,29 @@ app.post('/api/scenarios/:id/paper-outcome', async (c) => {
   return c.json({ outcome }, 201)
 })
 
+// ---- Post-hoc review grading (答え合わせ) ------------------------------------------------
+// Only after a paper outcome exists. Re-grading overwrites the verdict (it is the user's own
+// judgment, not a trade record); the paper outcome itself stays immutable.
+app.put('/api/scenarios/:id/reviews/:reviewId/grade', async (c) => {
+  const id = c.req.param('id')
+  const reviewId = c.req.param('reviewId')
+  const review = await c.env.DB.prepare('SELECT * FROM reviews WHERE id = ? AND scenario_id = ?')
+    .bind(reviewId, id).first<ReviewRow>()
+  if (!review) return c.json({ error: 'Review not found for this scenario' }, 404)
+
+  const body = await readJson(c)
+  const input = reviewGradeInputSchema.safeParse(body)
+  if (!input.success) return badRequest(c, 'Invalid review grade', body, issuesFrom(input.error))
+
+  const outcome = await c.env.DB.prepare('SELECT scenario_id FROM paper_outcomes WHERE scenario_id = ?').bind(id).first()
+  if (!outcome) return c.json({ error: 'Record the paper outcome before grading reviews' }, 409)
+
+  const gradedAt = new Date().toISOString()
+  await c.env.DB.prepare('UPDATE reviews SET verdict = ?, verdict_note = ?, graded_at = ? WHERE id = ? AND scenario_id = ?')
+    .bind(input.data.verdict, input.data.note, gradedAt, reviewId, id).run()
+  return c.json({ review: reviewDto({ ...review, verdict: input.data.verdict, verdict_note: input.data.note, graded_at: gradedAt }) })
+})
+
 // ---- Journal ----------------------------------------------------------------------------------
 type JournalRow = ScenarioRow & {
   o_exit_price: number | null
@@ -332,6 +365,7 @@ type JournalRow = ScenarioRow & {
   o_recorded_at: string | null
   bull: number
   bear: number
+  graded: number
   providers: string | null
 }
 app.get('/api/journal', async (c) => {
@@ -341,6 +375,7 @@ app.get('/api/journal', async (c) => {
         o.followed_plan AS o_followed_plan, o.note AS o_note, o.recorded_at AS o_recorded_at,
         (SELECT COUNT(*) FROM reviews r WHERE r.scenario_id = s.id AND r.role = 'BULL') AS bull,
         (SELECT COUNT(*) FROM reviews r WHERE r.scenario_id = s.id AND r.role = 'BEAR') AS bear,
+        (SELECT COUNT(*) FROM reviews r WHERE r.scenario_id = s.id AND r.verdict IS NOT NULL) AS graded,
         (SELECT GROUP_CONCAT(DISTINCT r.provider) FROM reviews r WHERE r.scenario_id = s.id) AS providers
       FROM scenarios s
       LEFT JOIN paper_outcomes o ON o.scenario_id = s.id
@@ -353,6 +388,7 @@ app.get('/api/journal', async (c) => {
       total: r.bull + r.bear,
       bull: r.bull,
       bear: r.bear,
+      graded: r.graded,
       providers: (r.providers ? r.providers.split(',') : []).sort() as Provider[],
     },
     outcome: r.o_recorded_at === null ? null : outcomeDto({
@@ -365,7 +401,17 @@ app.get('/api/journal', async (c) => {
       recorded_at: r.o_recorded_at,
     }),
   }))
-  return c.json({ entries, summary: summarizeJournal(entries), kind: 'paper' })
+  const scoreRows = await c.env.DB.prepare(
+    `SELECT r.scenario_id AS scenarioId, r.provider, r.role, r.verdict, o.r_multiple AS rMultiple
+       FROM reviews r LEFT JOIN paper_outcomes o ON o.scenario_id = r.scenario_id`,
+  ).all<ReviewScoreRow>()
+  const body: JournalResponse = {
+    entries,
+    summary: summarizeJournal(entries),
+    scorecard: summarizeReviewGrades(scoreRows.results),
+    kind: 'paper',
+  }
+  return c.json(body)
 })
 
 // ---- Market datasets (imported CSV snapshots) ---------------------------------------------

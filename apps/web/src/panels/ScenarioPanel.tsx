@@ -103,15 +103,15 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
       {loading ? <div className="empty short" aria-busy="true">読み込み中…</div>
         : scenarios.length === 0 ? <div className="empty short">まだシナリオがありません。上のフォームから最初の仮説を保存してください。</div>
         : (
-          <div className="table-wrap"><table data-testid="scenario-table">
+          <div className="table-wrap"><table className="responsive" data-testid="scenario-table">
             <thead><tr><th>作成</th><th>方向</th><th>足</th><th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th><th>根拠</th></tr></thead>
             <tbody>{scenarios.map((s) => (
               <tr key={s.id} onClick={() => onOpen(s.id)}>
-                <td>{timestamp(s.createdAt)}</td>
-                <td><span className={'side ' + (s.side === 'LONG' ? 'long' : 'short-side')}>{s.side}</span></td>
-                <td>{s.timeframe}</td><td>{price(s.entry)}</td><td>{price(s.stop)}</td><td>{price(s.target)}</td>
-                <td>1:{s.riskReward.toFixed(2)}</td>
-                <td className="clip"><button className="link-button" type="button">{s.thesis}</button></td>
+                <td data-label="作成">{timestamp(s.createdAt)}</td>
+                <td data-label="方向"><span className={'side ' + (s.side === 'LONG' ? 'long' : 'short-side')}>{s.side}</span></td>
+                <td data-label="足">{s.timeframe}</td><td data-label="Entry">{price(s.entry)}</td><td data-label="Stop">{price(s.stop)}</td><td data-label="Target">{price(s.target)}</td>
+                <td data-label="R:R">1:{s.riskReward.toFixed(2)}</td>
+                <td data-label="根拠" className="clip"><button className="link-button" type="button">{s.thesis}</button></td>
               </tr>
             ))}</tbody>
           </table></div>

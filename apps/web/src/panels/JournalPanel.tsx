@@ -6,11 +6,13 @@ import {
   type ExitReason,
   type JournalEntry,
   type JournalSummary,
+  type ReviewScorecard,
   type PlanComparison,
   type ScenarioDetail,
 } from '@tradecourt/core'
 import { api } from '../api'
 import { getError, price, signed, timestamp } from '../format'
+import { ReviewGrading, Scorecard, VerdictBadge } from './ReviewGrading'
 
 const exitReasonLabels: Record<ExitReason, string> = {
   TARGET: '利確価格に到達',
@@ -30,6 +32,7 @@ type Props = {
   detail: ScenarioDetail | null
   entries: JournalEntry[]
   summary: JournalSummary | null
+  scorecard: ReviewScorecard | null
   loading: boolean
   onSaved: () => Promise<void>
   onOpen: (id: string) => void
@@ -37,7 +40,7 @@ type Props = {
   onNotice: (message: string) => void
 }
 
-export function JournalPanel({ detail, entries, summary, loading, onSaved, onOpen, onError, onNotice }: Props) {
+export function JournalPanel({ detail, entries, summary, scorecard, loading, onSaved, onOpen, onError, onNotice }: Props) {
   const [exitPrice, setExitPrice] = useState('')
   const [exitReason, setExitReason] = useState<ExitReason>('MANUAL')
   const [followedPlan, setFollowedPlan] = useState(true)
@@ -90,7 +93,7 @@ export function JournalPanel({ detail, entries, summary, loading, onSaved, onOpe
             {detail.reviews.length === 0 ? <p className="muted small">AIレビューは保存されていません。</p> : (
               <ul className="review-mini" data-testid="journal-reviews">
                 {detail.reviews.map((r) => (
-                  <li key={r.id}><strong>{providerLabels[r.provider]}</strong> <span className={'side ' + (r.role === 'BULL' ? 'long' : 'short-side')}>{r.role}</span> <span className="excerpt">{r.content}</span></li>
+                  <li key={r.id}><strong>{providerLabels[r.provider]}</strong> <span className={'side ' + (r.role === 'BULL' ? 'long' : 'short-side')}>{r.role}</span> <span className="excerpt">{r.content}</span>{r.grade && <VerdictBadge verdict={r.grade.verdict} />}</li>
                 ))}
               </ul>
             )}
@@ -130,10 +133,12 @@ export function JournalPanel({ detail, entries, summary, loading, onSaved, onOpe
               </form>
             )}
           </div>
+          <ReviewGrading detail={detail} onSaved={onSaved} onError={onError} onNotice={onNotice} />
         </div>
       )}
 
       <div className="divider" />
+      {scorecard && <Scorecard scorecard={scorecard} />}
       <h3>判断履歴 <span className="muted">仮想取引のみ</span></h3>
       {summary && summary.scenarios > 0 && (
         <div className="stat-grid four" data-testid="journal-summary">
@@ -144,18 +149,19 @@ export function JournalPanel({ detail, entries, summary, loading, onSaved, onOpe
         </div>
       )}
       {loading ? null : entries.length === 0 ? <div className="empty short">まだ記録がありません。</div> : (
-        <div className="table-wrap"><table data-testid="journal-table">
-          <thead><tr><th>作成</th><th>方向</th><th>Entry</th><th>計画R:R</th><th>AIレビュー</th><th>仮想終了</th><th>R倍率</th><th>遵守</th></tr></thead>
+        <div className="table-wrap"><table className="responsive" data-testid="journal-table">
+          <thead><tr><th>作成</th><th>方向</th><th>Entry</th><th>計画R:R</th><th>AIレビュー</th><th>採点</th><th>仮想終了</th><th>R倍率</th><th>遵守</th></tr></thead>
           <tbody>{entries.map((e) => (
             <tr key={e.scenario.id} className={selected?.id === e.scenario.id ? 'selected' : ''} onClick={() => onOpen(e.scenario.id)}>
-              <td><button className="link-button" type="button">{timestamp(e.scenario.createdAt)}</button></td>
-              <td><span className={'side ' + (e.scenario.side === 'LONG' ? 'long' : 'short-side')}>{e.scenario.side}</span></td>
-              <td>{price(e.scenario.entry)}</td>
-              <td>1:{e.scenario.riskReward.toFixed(2)}</td>
-              <td>{e.reviewCounts.total ? `${e.reviewCounts.bull}↑ ${e.reviewCounts.bear}↓ (${e.reviewCounts.providers.map((p) => providerLabels[p]).join(', ')})` : '—'}</td>
-              <td>{e.outcome ? price(e.outcome.exitPrice) : <span className="muted">未記録</span>}</td>
-              <td>{e.outcome ? <strong className={e.outcome.rMultiple >= 0 ? 'positive' : 'negative'}>{signed(e.outcome.rMultiple)}R</strong> : '—'}</td>
-              <td>{e.outcome ? (e.outcome.followedPlan ? '✓' : '逸脱') : '—'}</td>
+              <td data-label="作成"><button className="link-button" type="button">{timestamp(e.scenario.createdAt)}</button></td>
+              <td data-label="方向"><span className={'side ' + (e.scenario.side === 'LONG' ? 'long' : 'short-side')}>{e.scenario.side}</span> <span className="muted">{e.scenario.timeframe}</span></td>
+              <td data-label="Entry">{price(e.scenario.entry)}</td>
+              <td data-label="計画R:R">1:{e.scenario.riskReward.toFixed(2)}</td>
+              <td data-label="AIレビュー">{e.reviewCounts.total ? `${e.reviewCounts.bull}↑ ${e.reviewCounts.bear}↓ (${e.reviewCounts.providers.map((p) => providerLabels[p]).join(', ')})` : '—'}</td>
+              <td data-label="採点">{e.reviewCounts.total ? <span className={e.outcome && e.reviewCounts.graded < e.reviewCounts.total ? 'warn' : ''}>{e.reviewCounts.graded}/{e.reviewCounts.total}</span> : '—'}</td>
+              <td data-label="仮想終了">{e.outcome ? price(e.outcome.exitPrice) : <span className="muted">未記録</span>}</td>
+              <td data-label="R倍率">{e.outcome ? <strong className={e.outcome.rMultiple >= 0 ? 'positive' : 'negative'}>{signed(e.outcome.rMultiple)}R</strong> : '—'}</td>
+              <td data-label="遵守">{e.outcome ? (e.outcome.followedPlan ? '✓' : '逸脱') : '—'}</td>
             </tr>
           ))}</tbody>
         </table></div>
