@@ -11,7 +11,8 @@
     "db:migrate:local": "pnpm --filter @tradecourt/api db:migrate:local",
     "test": "pnpm --filter @tradecourt/core test",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm --filter @tradecourt/web build"
+    "build": "pnpm --filter @tradecourt/web build",
+    "smoke:local": "node scripts/smoke-local.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
