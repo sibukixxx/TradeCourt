@@ -50,7 +50,7 @@ describe('pure trade math and prompt boundaries', () => {
     expect(calculatePaperRMultiple(long, 149.6)).toBe(-1)
     expect(calculatePaperRMultiple({
       ...long, side: 'SHORT', stop: 151, target: 149,
-    }, 149)).toBe(1.25)
+    }, 149)).toBe(1.5)
   })
 
   it('generates distinct roles without pretending to know live prices', () => {
