@@ -9,7 +9,7 @@
 // Every non-loopback request is blocked and recorded; the run FAILS if any is attempted.
 // External AI sites are never opened, logged into or automated: only link attributes are checked.
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
@@ -393,18 +393,80 @@ async function main() {
       assert.equal(await page.getByTestId('path-result').getByTestId('path-outcome').innerText(), '損切りに先に到達')
     })
 
-    await step('Mobile (390x844): all four screens render without horizontal overflow', async () => {
+    await step('18-19. Path-based grading suggestion, Insights aggregation and CSV/JSON export', async () => {
+      const post = (path, body) => apiJson(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const ds = (await apiJson('/api/market/datasets')).body.datasets.find((d) => d.sourceName === 'synthetic-usdjpy.csv')
+      // Synthetic: paper exit +0.14R (above entry) but the CSV hit the stop first; rule deviation.
+      const sc = (await post('/api/scenarios', { symbol: 'USDJPY', timeframe: '1d', side: 'LONG', entry: 151, stop: 149.6, target: 152.4, thesis: 'Synthetic E2E: paper result and CSV path disagree', invalidation: 'Synthetic only', marketRef: { datasetId: ds.id, asOfDate: '2026-01-06' } })).body.scenario
+      await post(`/api/scenarios/${sc.id}/reviews`, { provider: 'gemini', role: 'BULL', content: 'Synthetic BULL answer for the disagreement case' })
+      await post(`/api/scenarios/${sc.id}/paper-outcome`, { exitPrice: 151.2, exitReason: 'MANUAL', followedPlan: false })
+      await page.goto(`${base}/#/journal/${sc.id}`)
+      await page.reload()
+      await page.getByTestId('path-result').getByText('損切りに先に到達').waitFor()
+      const card = page.getByTestId('review-grading').getByRole('article', { name: /Gemini BULL/ })
+      const miss = card.getByRole('button', { name: /外れ/ })
+      await miss.getByText('値動きより').waitFor()
+      assert.equal(await miss.getAttribute('aria-pressed'), 'true', 'path-based suggestion should be preselected')
+      assert.match(await card.getByRole('button', { name: /的中/ }).innerText(), /結果より/)
+
+      await nav('Insights')
+      const ins = page.getByTestId('insights')
+      await ins.waitFor()
+      await page.getByTestId('equity-chart').waitFor()
+      if (isolated) {
+        // Closed: +2 (s1), +1 (fresh), -0.357 (linked), +0.143 (this one; deviated).
+        assert.equal(await page.getByTestId('ins-average').innerText(), '+0.70R')
+        assert.equal(await page.getByTestId('ins-winrate').innerText(), '75%')
+        assert.equal(await page.getByTestId('ins-drawdown').innerText(), '-0.36R')
+        assert.equal(await page.getByTestId('ins-gap').innerText(), '+0.89R')
+        assert.match(await page.getByTestId('ins-saved').innerText(), /2回[\s\S]*\+1\.79R 軽減/)
+        assert.match(await page.getByTestId('ins-plan-note').innerText(), /破った回は、守った回より平均 -0\.74R/)
+        await page.getByRole('button', { name: '直近10件' }).click()
+        await page.getByTestId('ins-average').getByText('+0.70R').waitFor()
+      }
+      await shot('06-insights')
+
+      const download = async (testId) => {
+        const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId(testId).click()])
+        return { name: dl.suggestedFilename(), bytes: readFileSync(await dl.path()) }
+      }
+      const csv = await download('export-csv')
+      assert.match(csv.name, /^tradecourt-export-.*\.csv$/)
+      assert.deepEqual([...csv.bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf])
+      const lines = csv.bytes.toString('utf8').slice(1).trim().split('\r\n')
+      assert.ok(lines[0].startsWith('scenario_id,created_at,symbol'))
+      if (isolated) assert.equal(lines.length, 1 + 4)
+      assert.ok(csv.bytes.toString('utf8').includes('paper (user-entered, not broker fills)'))
+      const json = JSON.parse((await download('export-json')).bytes.toString('utf8'))
+      assert.equal(json.kind, 'paper')
+      if (isolated) assert.equal(json.scenarios.length, 4)
+    })
+
+    await step('Mobile (390x844): all five screens render without horizontal overflow', async () => {
       const mctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
       const m = await mctx.newPage()
-      const headings = { market: /Market Lens/, scenario: /New Scenario/, court: /AI Court/, journal: /Journal/ }
+      // A second synthetic dataset makes Market Lens render its import-history table on the phone too.
+      await apiJson('/api/market/datasets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        symbol: 'USDJPY', timeframe: '4h', sourceName: 'synthetic-second-dataset-with-a-long-file-name.csv', tzOffset: '+00:00',
+        candles: [{ date: '2026-01-09 00:00', open: 150, high: 150.5, low: 149.8, close: 150.2 }, { date: '2026-01-09 04:00', open: 150.2, high: 150.6, low: 150, close: 150.4 }],
+      }) })
+      const headings = { market: /Market Lens/, scenario: /New Scenario/, court: /AI Court/, journal: /Journal/, insights: /Insights/ }
       for (const [i, route] of Object.keys(headings).entries()) {
         await m.goto(`${base}/#/${route}/${scenarioId}`)
         await m.reload() // fresh load per screen: hash-only goto is a same-document navigation
         await m.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
         await m.locator('.panel h2').filter({ hasText: headings[route] }).waitFor()
+        if (route === 'market') await m.getByTestId('dataset-table').waitFor()
         await m.waitForTimeout(200)
         const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
         assert.ok(overflow <= 0, `${route}: horizontal overflow ${overflow}px`)
+        // Tables must also stay inside their cards (clipped columns don't show up as page overflow).
+        const spill = await m.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.table-wrap')].map((w) => {
+          if (getComputedStyle(w).overflowX !== 'visible') return 0 // scrollable on purpose
+          const table = w.querySelector('table')
+          return table ? Math.round(table.getBoundingClientRect().right - w.getBoundingClientRect().right) : 0
+        })))
+        assert.ok(spill <= 1, `${route}: a table extends ${spill}px past its container`)
         await m.screenshot({ path: join(outDir, `mobile-0${i + 1}-${route}.png`), fullPage: true })
       }
       await mctx.close()
