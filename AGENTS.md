@@ -28,6 +28,8 @@ Build and verify a **local-first trading-decision review application**, not a si
 4. Check invalid stop/target, missing fields, missing ID, repeated outcome, and no external AI/broker call.
 5. Report PASS/FAIL/NOT RUN with exact commands, environment, and evidence; no assumed success.
 
+Shortcuts (macOS/Linux): `make verify` covers 1–2 plus the isolated browser E2E; `make start`, `make smoke`, `make e2e-dev`, `make stop` cover 3–4 against the running app. Run `make` for all targets.
+
 ## Change discipline
 - Read README, docs/ARCHITECTURE.md, docs/ROADMAP.md first.
 - Small cohesive PRs; note risks and verification. Don't silently widen scope into auto-execution or OAuth.
