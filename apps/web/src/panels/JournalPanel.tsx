@@ -57,6 +57,32 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
   const outcome = detail?.outcome
   const comparison = selected && outcome ? comparePlanToOutcome(selected, outcome.exitPrice) : null
 
+  // One-tap paper outcome: pick a planned level, then confirm (records are immutable).
+  type Quick = { key: 'TARGET' | 'STOP' | 'BREAKEVEN'; label: string; price: number; reason: ExitReason }
+  const quickOptions: Quick[] = selected ? [
+    { key: 'TARGET', label: '利確で終了', price: selected.target, reason: 'TARGET' },
+    { key: 'STOP', label: '損切りで終了', price: selected.stop, reason: 'STOP' },
+    { key: 'BREAKEVEN', label: '建値で撤退', price: selected.entry, reason: 'MANUAL' },
+  ] : []
+  const pathKey = pathOutcome === 'TARGET_FIRST' ? 'TARGET' : pathOutcome === 'STOP_FIRST' ? 'STOP' : null
+  const [quick, setQuick] = useState<Quick | null>(null)
+  const [quickFollowed, setQuickFollowed] = useState(true)
+  const [quickNote, setQuickNote] = useState('')
+
+  async function recordQuick() {
+    if (!selected || !quick || busy) return
+    setBusy(true)
+    try {
+      await api.paperOutcome(selected.id, { exitPrice: quick.price, exitReason: quick.reason, followedPlan: quickFollowed, note: quickNote })
+      setQuick(null); setQuickNote(''); setQuickFollowed(true)
+      await onSaved()
+      onNotice(`「${quick.label}」として仮想結果を記録しました。これは実際の約定記録ではありません。`)
+    } catch (e) {
+      onError(getError(e))
+      await onSaved().catch(() => undefined)
+    } finally { setBusy(false) }
+  }
+
   async function saveOutcome(event: Event) {
     event.preventDefault()
     if (!selected || busy) return
@@ -122,8 +148,36 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
                 <p className="muted small">手動入力 / {timestamp(outcome.recordedAt)}。実際の約定・スプレッド・手数料・スワップは含みません。記録は変更できません。</p>
               </div>
             ) : (
-              <form onSubmit={(e) => void saveOutcome(e)} aria-label="仮想結果の記録">
+              <>
+              <section className="quick-record" aria-label="ワンタップ記録" data-testid="quick-record">
                 <h3>仮想取引の終了を記録</h3>
+                <p className="muted small">計画した水準で終わった場合は、ボタンを押して確認するだけで記録できます。</p>
+                <div className="quick-buttons">
+                  {quickOptions.map((q) => {
+                    const r = calculatePaperRMultiple(selected, q.price)
+                    return (
+                      <button key={q.key} type="button" aria-pressed={quick?.key === q.key} className={'quick-button ' + q.key.toLowerCase() + (quick?.key === q.key ? ' selected' : '')} onClick={() => setQuick(q)}>
+                        <strong>{q.label}</strong>
+                        <span>{price(q.price)} · {signed(r)}R</span>
+                        {pathKey === q.key && <em data-testid="quick-path-badge">CSVの値動きどおり</em>}
+                      </button>
+                    )
+                  })}
+                </div>
+                {quick && (
+                  <div className="quick-confirm" data-testid="quick-confirm" role="group" aria-label="記録の確認">
+                    <p><strong>{quick.label}</strong>：{price(quick.price)}（{signed(calculatePaperRMultiple(selected, quick.price))}R）で記録します。記録後は変更できません。</p>
+                    <label className="check"><input type="checkbox" checked={quickFollowed} onChange={(e) => setQuickFollowed(e.currentTarget.checked)} />事前に決めたルールに従った</label>
+                    <label>メモ（任意）<input maxLength={2000} placeholder="一言でも振り返りを残すと、後で役立ちます" value={quickNote} onInput={(e) => setQuickNote(e.currentTarget.value)} /></label>
+                    <div className="quick-actions">
+                      <button type="button" className="primary" disabled={busy} onClick={() => void recordQuick()}>{busy ? '記録中…' : 'この内容で記録'}</button>
+                      <button type="button" className="secondary" onClick={() => setQuick(null)}>やめる</button>
+                    </div>
+                  </div>
+                )}
+              </section>
+              <form onSubmit={(e) => void saveOutcome(e)} aria-label="仮想結果の記録">
+                <h4>その他の価格で終了した場合（手入力）</h4>
                 <label>仮想終了価格<input name="exitPrice" type="number" required step="any" min="0.001" placeholder="例: 151.400" value={exitPrice} onInput={(e) => setExitPrice(e.currentTarget.value)} /></label>
                 <div className="ratio-preview" data-testid="r-preview"><span>R倍率（プレビュー）</span><strong>{previewR === null ? '入力待ち' : signed(previewR) + 'R'}</strong></div>
                 <label>終了理由<select value={exitReason} onChange={(e) => setExitReason(e.currentTarget.value as ExitReason)}>
@@ -134,6 +188,7 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
                 <button className="primary full" type="submit" disabled={busy}>{busy ? '保存中…' : '仮想結果を保存'}</button>
                 <p className="muted small">1シナリオにつき1回だけ保存できます（変更不可）。R倍率は値幅のみで算出します。</p>
               </form>
+              </>
             )}
           </div>
           <PathCheck detail={detail} onError={onError} onResult={setPathOutcome} />

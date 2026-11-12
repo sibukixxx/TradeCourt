@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { calculateRiskReward, scenarioInputSchema, type MarketDataset, type MarketDatasetMeta, type Scenario } from '@tradecourt/core'
+import { calculateRiskReward, draftLevels, scenarioInputSchema, targetForR, type LevelMethod, type MarketDataset, type MarketDatasetMeta, type Scenario } from '@tradecourt/core'
 import { api, newRequestKey } from '../api'
 import { getError, price, timestamp } from '../format'
 import { PriceChart } from '../components/PriceChart'
@@ -68,6 +68,25 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
   const directional = pricesValid && (draft.side === 'LONG' ? stop < entry && target > entry : target < entry && stop > entry)
   const ratio = directional ? calculateRiskReward({ entry, stop, target }) : null
   const directionIssue = pricesValid && !directional
+  // Auto draft (deterministic rules on the user's CSV up to the as-of candle; direction = user's choice).
+  const [method, setMethod] = useState<LevelMethod>('SWING')
+  const [draftR, setDraftR] = useState(2)
+  const levelDraft = linked && asOfIndex >= 0 ? draftLevels(linked.candles, asOfIndex, draft.side, method, draftR, linked.timeframe) : null
+  const stopSideOk = Number.isFinite(entry) && Number.isFinite(stop) && entry > 0 && stop > 0 &&
+    (draft.side === 'LONG' ? stop < entry : stop > entry)
+  const isAutoText = (text: string) => text.trim() === '' || text.startsWith('【自動下書き')
+  function applyDraft() {
+    if (!levelDraft) return
+    requestKey.current = null
+    setDraft((old) => ({
+      ...old,
+      entry: String(levelDraft.entry),
+      stop: String(levelDraft.stop),
+      target: String(levelDraft.target),
+      thesis: isAutoText(old.thesis) ? levelDraft.thesisDraft : old.thesis,
+      invalidation: isAutoText(old.invalidation) || /^[\d.]+ を(下|上)回ったら仮説は無効$/.test(old.invalidation) ? levelDraft.invalidationDraft : old.invalidation,
+    }))
+  }
   const asOfOptions = linked ? linked.candles.slice(-MAX_AS_OF_OPTIONS).map((c) => c.date).reverse() : []
 
   function patch<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -131,6 +150,30 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
                 <span>仮説時点の足の終値（CSV）<strong data-testid="as-of-close">{price(asOfCandle.close)}</strong></span>
                 <button type="button" className="secondary" onClick={() => patch('entry', String(asOfCandle.close))}>Entryに使う</button>
               </div>
+              <div className="auto-draft" data-testid="auto-draft">
+                <div className="auto-draft-head">
+                  <strong>自動下書き</strong>
+                  <span className="muted small">方向（{draft.side}）はあなたが選択。過去の足に決まったルールを当てはめるだけで、売買の推奨ではありません。</span>
+                </div>
+                <div className="auto-draft-controls">
+                  <div className="segmented" role="group" aria-label="損切りの決め方">
+                    <button type="button" aria-pressed={method === 'SWING'} className={method === 'SWING' ? 'selected' : ''} onClick={() => setMethod('SWING')}>直近の{draft.side === 'LONG' ? '安値' : '高値'}の外</button>
+                    <button type="button" aria-pressed={method === 'ATR'} className={method === 'ATR' ? 'selected' : ''} onClick={() => setMethod('ATR')}>ATR×1.5</button>
+                  </div>
+                  <div className="segmented" role="group" aria-label="利確の倍率">
+                    {[1.5, 2, 3].map((r) => <button key={r} type="button" aria-pressed={draftR === r} className={draftR === r ? 'selected' : ''} onClick={() => setDraftR(r)}>{r}R</button>)}
+                  </div>
+                </div>
+                {levelDraft ? (
+                  <div className="auto-draft-result">
+                    <span data-testid="draft-levels">Entry <strong>{price(levelDraft.entry)}</strong> / Stop <strong>{price(levelDraft.stop)}</strong> / Target <strong>{price(levelDraft.target)}</strong></span>
+                    <button type="button" className="primary" onClick={applyDraft}>下書きを入力</button>
+                  </div>
+                ) : (
+                  <p className="muted small" data-testid="draft-unavailable">{method === 'ATR' ? 'ATRの計算には仮説時点までに15本以上の足が必要です。' : 'この足の終値が直近の安値／高値そのものなので、外側に損切りを置けません。'}</p>
+                )}
+                <p className="muted small">ルール: Entry＝仮説時点の終値 / Stop＝{method === 'ATR' ? 'ATR(14)の1.5倍' : `直近${levelDraft?.facts.lookback ?? 20}本の${draft.side === 'LONG' ? '安値の少し下' : '高値の少し上'}`} / Target＝リスクの{draftR}倍。根拠と無効化条件の下書きも入ります（自分の根拠を書き足してください）。</p>
+              </div>
               <PriceChart
                 candles={linked.candles.slice(Math.max(0, asOfIndex - 59), asOfIndex + 1)}
                 label="仮説時点までの終値（CSV）"
@@ -151,6 +194,14 @@ export function ScenarioPanel({ scenarios, loading, onCreated, onOpen, onError }
           <span>想定リスクリワード</span>
           <strong>{ratio !== null ? '1 : ' + ratio.toFixed(2) : directionIssue ? '方向が不正' : '入力待ち'}</strong>
           <span>{draft.side === 'LONG' ? 'LONG: Stop < Entry < Target' : 'SHORT: Target < Entry < Stop'}</span>
+        </div>
+        <div className="r-presets" data-testid="r-presets">
+          <span>利確をRで決める</span>
+          {[1, 1.5, 2, 3].map((r) => (
+            <button key={r} type="button" className="secondary" disabled={!stopSideOk}
+              onClick={() => patch('target', String(targetForR(draft.side, entry, stop, r)))}>{r}R</button>
+          ))}
+          {!stopSideOk && <small className="muted">EntryとStopを入れると、リスクの倍数で利確を自動計算します</small>}
         </div>
         <label>エントリーの根拠（12文字以上）<textarea name="thesis" required minLength={12} maxLength={2000} rows={3} placeholder="具体的な根拠。現時点で確認できていない点も書いてください。" value={draft.thesis} onInput={(e) => patch('thesis', e.currentTarget.value)} /></label>
         <label>この仮説が無効になる条件（5文字以上）<textarea name="invalidation" required minLength={5} maxLength={1000} rows={2} placeholder="例：特定価格を終値で割った場合" value={draft.invalidation} onInput={(e) => patch('invalidation', e.currentTarget.value)} /></label>
