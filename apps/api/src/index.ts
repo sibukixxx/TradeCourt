@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { REQUIRED_MIGRATION } from './schema'
+import { QuoteError, fetchQuote } from './quotes'
 import {
   calculatePaperRMultiple,
   calculateRiskReward,
@@ -8,6 +9,7 @@ import {
   candleTime,
   analyzeDecisions,
   evaluatePath,
+  quoteProvider,
   toCsv,
   marketDatasetInputSchema,
   paperOutcomeInputSchema,
@@ -34,7 +36,7 @@ import {
 } from '@tradecourt/core'
 
 // LOCAL DEVELOPMENT ONLY. There is no authentication. Do not deploy publicly.
-type Bindings = { DB: D1Database }
+type Bindings = { DB: D1Database; QUOTE_PROVIDER?: string }
 type AppContext = Context<{ Bindings: Bindings }>
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -209,7 +211,23 @@ app.get('/api/health', async (c) => {
     const message = `Local database migrations are pending (need ${REQUIRED_MIGRATION}). Stop the app and run: make migrate (or corepack pnpm db:migrate:local)`
     return c.json({ status: 'setup_required', error: message, message, requiredMigration: REQUIRED_MIGRATION }, 503)
   }
-  return c.json({ status: 'ok', mode: 'local', liveMarketData: false, orderExecution: false })
+  return c.json({
+    status: 'ok', mode: 'local', liveMarketData: false, orderExecution: false,
+    /** Optional user-initiated reference quote source ('off' = disabled). */
+    quoteProvider: quoteProvider(c.env.QUOTE_PROVIDER),
+  })
+})
+
+// ---- Optional reference quote (only when the user presses 現在値を取得) ----------------------
+app.get('/api/quote/usdjpy', async (c) => {
+  const provider = quoteProvider(c.env.QUOTE_PROVIDER)
+  if (provider === 'off') return c.json({ error: 'External quotes are disabled (QUOTE_PROVIDER=off)' }, 403)
+  try {
+    return c.json({ quote: await fetchQuote(provider) })
+  } catch (e) {
+    if (e instanceof QuoteError) return c.json({ error: e.message }, 502)
+    throw e
+  }
 })
 
 // ---- Scenarios --------------------------------------------------------------------------------

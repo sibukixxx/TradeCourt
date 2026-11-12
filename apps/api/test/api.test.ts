@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import app from '../src/index'
 import { REQUIRED_MIGRATION } from '../src/schema'
 import { createTestD1, migrationFiles } from './d1-sqlite'
@@ -459,5 +459,56 @@ describe('decision analysis and export', () => {
     expect((await call('/api/analysis')).data.analysis.overview.count).toBe(0)
     const res = await app.request(`${base}/api/export?format=csv`, {}, env)
     expect((await res.text()).trim().split('\r\n')).toHaveLength(1)
+  })
+})
+
+describe('optional reference quote (user-initiated)', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+  const withProvider = (provider?: string) => { env = { ...env, QUOTE_PROVIDER: provider } as typeof env }
+
+  it('is disabled unless configured, and health reports the provider', async () => {
+    expect((await call('/api/health')).data.quoteProvider).toBe('off')
+    expect((await call('/api/quote/usdjpy')).status).toBe(403)
+    withProvider('something-else')
+    expect((await call('/api/quote/usdjpy')).status).toBe(403)
+  })
+
+  it('synthetic provider returns a labelled fixed value without network', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    withProvider('synthetic')
+    const { status, data } = await call('/api/quote/usdjpy')
+    expect(status).toBe(200)
+    expect(data.quote).toMatchObject({ symbol: 'USDJPY', price: 150.123, provider: 'synthetic', realtime: false, kind: 'reference' })
+    expect(data.quote.source).toMatch(/SYNTHETIC/)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('frankfurter provider: validated ECB daily reference rate, plain GET without user data', async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ amount: 1, base: 'USD', date: '2026-11-12', rates: { JPY: 159.7 } }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    withProvider('frankfurter')
+    expect((await call('/api/health')).data.quoteProvider).toBe('frankfurter')
+    const { status, data } = await call('/api/quote/usdjpy')
+    expect(status).toBe(200)
+    expect(data.quote).toMatchObject({ price: 159.7, asOf: '2026-11-12', provider: 'frankfurter', realtime: false })
+    expect(data.quote.source).toMatch(/European Central Bank daily reference rate/)
+    const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY')
+    expect(init.body).toBeUndefined()
+    expect(init.method).toBeUndefined() // GET
+  })
+
+  it.each([
+    ['HTTP error', async () => new Response('down', { status: 500 })],
+    ['malformed body', async () => new Response('not json', { status: 200 })],
+    ['out-of-range value', async () => new Response(JSON.stringify({ base: 'USD', date: '2026-11-12', rates: { JPY: 9999 } }), { status: 200 })],
+    ['network failure', async () => { throw new TypeError('fetch failed') }],
+  ])('frankfurter provider: %s -> 502 without crashing', async (_label, impl) => {
+    vi.stubGlobal('fetch', vi.fn(impl))
+    withProvider('frankfurter')
+    const { status, data } = await call('/api/quote/usdjpy')
+    expect(status).toBe(502)
+    expect(data.error).toMatch(/Quote provider/)
   })
 })
