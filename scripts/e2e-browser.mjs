@@ -442,6 +442,69 @@ async function main() {
       if (isolated) assert.equal(json.scenarios.length, 4)
     })
 
+    await step('20-21. Auto-drafted levels from the CSV, R-multiple target buttons and one-tap paper outcome', async () => {
+      await page.goto(`${base}/#/scenario`)
+      await page.reload()
+      const form = page.getByRole('form', { name: 'シナリオ登録' })
+      const ds = (await apiJson('/api/market/datasets')).body.datasets.find((d) => d.sourceName === 'synthetic-usdjpy.csv')
+      await form.locator('select[name=datasetId]').selectOption(ds.id)
+      await page.getByTestId('as-of-close').getByText('150.400').waitFor() // default as-of = latest candle 2026-01-08
+      const levels = page.getByTestId('draft-levels')
+      // LONG (user's choice): stop = 20-candle low 149.5 - 0.02, target = 2R.
+      assert.equal(await levels.innerText(), 'Entry 150.400 / Stop 149.480 / Target 152.240')
+      await page.getByRole('group', { name: '利確の倍率' }).getByRole('button', { name: '3R' }).click()
+      assert.match(await levels.innerText(), /Target 153\.160/)
+      await page.getByRole('group', { name: '損切りの決め方' }).getByRole('button', { name: 'ATR×1.5' }).click()
+      await page.getByTestId('draft-unavailable').getByText(/15本以上/).waitFor() // only 4 synthetic candles
+      await page.getByRole('group', { name: '損切りの決め方' }).getByRole('button', { name: /安値の外/ }).click()
+      await page.getByRole('button', { name: '下書きを入力' }).click()
+      assert.equal(await form.locator('input[name=entry]').inputValue(), '150.4')
+      assert.equal(await form.locator('input[name=stop]').inputValue(), '149.48')
+      assert.equal(await form.locator('input[name=target]').inputValue(), '153.16')
+      assert.match(await form.locator('textarea[name=thesis]').inputValue(), /^【自動下書き・要編集】1d足 2026-01-08 の終値 150\.4/)
+      assert.equal(await form.locator('textarea[name=invalidation]').inputValue(), '149.48 を下回ったら仮説は無効')
+      await page.getByTestId('rr-preview').getByText('1 : 3.00').waitFor()
+      // R buttons work from Entry/Stop alone.
+      await page.getByTestId('r-presets').getByRole('button', { name: '2R', exact: true }).click()
+      assert.equal(await form.locator('input[name=target]').inputValue(), '152.24')
+      await page.getByTestId('rr-preview').getByText('1 : 2.00').waitFor()
+      await form.getByRole('button', { name: /Save/ }).click()
+      await page.getByRole('status').getByText('シナリオを保存しました').waitFor()
+      await shot('07-auto-draft-saved')
+
+      // One-tap outcome: choose, cancel, choose again, confirm.
+      await nav('Journal')
+      const quick = page.getByTestId('quick-record')
+      await quick.getByRole('button', { name: /利確で終了/ }).click()
+      await page.getByTestId('quick-confirm').getByText(/152\.240（\+2\.00R）で記録します/).waitFor()
+      await page.getByRole('button', { name: 'やめる' }).click()
+      assert.equal(await page.getByTestId('quick-confirm').count(), 0)
+      await quick.getByRole('button', { name: /利確で終了/ }).click()
+      await page.getByRole('button', { name: 'この内容で記録' }).click()
+      await page.getByRole('status').getByText(/「利確で終了」として仮想結果を記録しました/).waitFor()
+      assert.equal(await page.getByTestId('outcome-result').getByTestId('r-multiple').innerText(), '+2.00R')
+      assert.match(await page.getByTestId('outcome-result').innerText(), /利確価格に到達/)
+
+      // Phone, touch: the button matching the CSV path is marked; record by two taps.
+      const post = (path, body) => apiJson(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const sc = (await post('/api/scenarios', { symbol: 'USDJPY', timeframe: '1d', side: 'LONG', entry: 151, stop: 149.6, target: 152.4, thesis: 'Synthetic E2E: one-tap on a phone', invalidation: 'Synthetic only', marketRef: { datasetId: ds.id, asOfDate: '2026-01-06' } })).body.scenario
+      const mctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+      const m = await mctx.newPage()
+      await m.goto(`${base}/#/journal/${sc.id}`)
+      await m.getByTestId('path-result').getByText('損切りに先に到達').waitFor()
+      const stopBtn = m.getByTestId('quick-record').getByRole('button', { name: /損切りで終了/ })
+      await stopBtn.getByTestId('quick-path-badge').waitFor()
+      const box = await stopBtn.boundingBox()
+      assert.ok(box && box.height >= 44, `quick button too small: ${box?.height}`)
+      await stopBtn.tap()
+      await m.getByRole('button', { name: 'この内容で記録' }).tap()
+      await m.getByTestId('outcome-result').getByTestId('r-multiple').getByText('-1.00R').waitFor()
+      const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      assert.ok(overflow <= 0, `journal one-tap: horizontal overflow ${overflow}px`)
+      await m.screenshot({ path: join(outDir, 'mobile-06-one-tap.png'), fullPage: true })
+      await mctx.close()
+    })
+
     await step('Mobile (390x844): all five screens render without horizontal overflow', async () => {
       const mctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
       const m = await mctx.newPage()

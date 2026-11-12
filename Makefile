@@ -33,7 +33,7 @@ web: ## Run only the Vite web app (:5173) in the foreground (needs the API)
 	$(PNPM) --filter @tradecourt/web dev
 
 start: ## Apply pending local migrations, start API + Web in the background, wait until healthy
-	@$(DEVCTL) running >/dev/null 2>&1 || $(PNPM) db:migrate:local >/dev/null
+	@$(DEVCTL) running >/dev/null 2>&1 || $(PNPM) db:migrate:local >/dev/null 2>&1 || { echo 'Local migration failed. Run make migrate to see the error.'; exit 1; }
 	@$(DEVCTL) start
 
 stop: ## Stop the background servers started by `make start`
