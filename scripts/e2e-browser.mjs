@@ -77,6 +77,7 @@ const badCsv = 'date,open,high,low,close\n2026-01-05,150,149,148,150\n2026-01-06
 const XSS = '<img src=x onerror="window.__xss=1"><script>window.__xss=2</script>'
 
 const steps = []
+let failureShot = null // set once a page exists; captures the screen when a step fails
 async function step(name, fn) {
   const started = Date.now()
   try {
@@ -85,6 +86,7 @@ async function step(name, fn) {
     console.log(`PASS  ${name}`)
   } catch (e) {
     steps.push({ name, status: 'FAIL', ms: Date.now() - started, error: e.message })
+    await failureShot?.().catch(() => undefined)
     console.log(`FAIL  ${name}\n      ${e.message.split('\n').join('\n      ')}`)
     throw e
   }
@@ -94,6 +96,8 @@ async function main() {
   const external = process.env.TRADECOURT_E2E_BASE_URL
   if (external && !LOOPBACK.test(external)) throw new Error('TRADECOURT_E2E_BASE_URL must be loopback')
   const base = external ?? await startIsolatedStack()
+  // Scorecard totals are global; exact values are only asserted on the clean isolated database.
+  const isolated = !external
   console.log(`TradeCourt browser E2E against ${base} (${external ? 'existing dev server' : 'isolated temp D1'})`)
 
   const browser = await chromium.launch()
@@ -116,6 +120,7 @@ async function main() {
   const pageErrors = []
   page.on('pageerror', (e) => pageErrors.push(e.message))
   const shot = (name) => page.screenshot({ path: join(outDir, `${name}.png`), fullPage: true })
+  failureShot = () => shot('FAILED-step')
   const nav = (label) => page.getByRole('navigation', { name: '画面' }).getByRole('button', { name: label }).click()
   const apiJson = (path, init) => page.evaluate(async ([p, i]) => {
     const r = await fetch(p, i); return { status: r.status, body: await r.json() }
@@ -230,6 +235,7 @@ async function main() {
 
     await step('10-11. Journal: paper exit recorded, R multiple shown, plan vs decision compared', async () => {
       await nav('Journal')
+      await page.getByTestId('grading-locked').waitFor() // grading only after a paper outcome exists
       const form = page.getByRole('form', { name: '仮想結果の記録' })
       await form.locator('input[name=exitPrice]').fill('151.4')
       await page.getByTestId('r-preview').getByText('+2.00R').waitFor()
@@ -246,6 +252,48 @@ async function main() {
       await shot('03-journal')
     })
 
+    await step('14-15. 答え合わせ: grade each AI review against the paper outcome, scorecard updates, re-grade allowed', async () => {
+      const grading = page.getByTestId('review-grading')
+      const cards = grading.getByTestId('grade-card')
+      assert.equal(await cards.count(), 2)
+      const claude = grading.getByRole('article', { name: /Claude BULL/ })
+      const gpt = grading.getByRole('article', { name: /ChatGPT BEAR/ })
+      // +2R paper win: suggestion is BULL=HIT, BEAR=MISS (pre-selected but not saved).
+      assert.equal(await claude.getByRole('button', { name: /的中/ }).getAttribute('aria-pressed'), 'true')
+      assert.equal(await gpt.getByRole('button', { name: /外れ/ }).getAttribute('aria-pressed'), 'true')
+      assert.equal(await claude.getByText('未採点').count(), 1)
+      await claude.getByLabel('メモ（任意）').fill('Synthetic: pullback thesis held')
+      await claude.getByRole('button', { name: '採点を保存' }).click()
+      await page.getByRole('status').getByText(/ClaudeのBULLレビューを「的中」/).waitFor()
+      const gpt2 = page.getByTestId('review-grading').getByRole('article', { name: /ChatGPT BEAR/ })
+      await gpt2.getByRole('button', { name: /判定不能/ }).click()
+      await gpt2.getByRole('button', { name: '採点を保存' }).click()
+      await page.getByRole('status').getByText(/ChatGPTのBEARレビューを「判定不能」/).waitFor()
+      await page.getByTestId('grading-progress').getByText('採点済み 2 / 2').waitFor()
+      const card = page.getByTestId('scorecard')
+      if (isolated) {
+        assert.equal(await card.getByTestId('overall-hit-rate').innerText(), '100%') // UNCLEAR excluded
+        assert.equal(await card.getByTestId('awaiting-grade').innerText(), '0')
+      }
+      // Re-grade ChatGPT BEAR as MISS.
+      const gpt3 = page.getByTestId('review-grading').getByRole('article', { name: /ChatGPT BEAR/ })
+      await gpt3.getByRole('button', { name: /外れ/ }).click()
+      await gpt3.getByRole('button', { name: '採点を更新' }).click()
+      await page.getByRole('status').getByText(/「外れ」/).waitFor()
+      if (isolated) {
+        await card.getByTestId('overall-hit-rate').getByText('50%').waitFor()
+        assert.match(await card.getByTestId('scorecard-table').innerText(), /ChatGPT[\s\S]*BEAR[\s\S]*0%/)
+      }
+      assert.match(await page.getByTestId('journal-table').innerText(), /2\/2/)
+      // The outcome is unaffected by grading.
+      assert.equal(await page.getByTestId('r-multiple').innerText(), '+2.00R')
+      await nav('AI Court')
+      const badges = page.getByTestId('review-compare').getByTestId('verdict-badge')
+      assert.deepEqual((await badges.allInnerTexts()).sort(), ['的中', '外れ'].sort())
+      await nav('Journal')
+      await shot('04-grading')
+    })
+
     await step('Error paths via API: duplicate outcome 409, invalid stop 400, missing id 404, malformed 400, cross-origin 403', async () => {
       const post = (path, body, headers = {}) => apiJson(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body })
       assert.equal((await post(`/api/scenarios/${scenarioId}/paper-outcome`, JSON.stringify({ exitPrice: 149.6 }))).status, 409)
@@ -255,13 +303,23 @@ async function main() {
       assert.equal((await post('/api/scenarios', '{not json')).status, 400)
       const res = await fetch(`${base}/api/scenarios`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: '{}' })
       assert.equal(res.status, 403)
+      const fresh = (await post('/api/scenarios', JSON.stringify({ symbol: 'USDJPY', timeframe: '1h', side: 'LONG', entry: 150, stop: 149.5, target: 151, thesis: 'Synthetic E2E: ungraded scenario', invalidation: 'Synthetic only' }))).body.scenario
+      const rv = (await post(`/api/scenarios/${fresh.id}/reviews`, JSON.stringify({ provider: 'gemini', role: 'BULL', content: 'Synthetic pasted review text' }))).body.review
+      const put = (body) => apiJson(`/api/scenarios/${fresh.id}/reviews/${rv.id}/grade`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body })
+      assert.equal((await put(JSON.stringify({ verdict: 'HIT' }))).status, 409, 'grading before outcome must be refused')
+      await post(`/api/scenarios/${fresh.id}/paper-outcome`, JSON.stringify({ exitPrice: 150.5 }))
+      assert.equal((await put(JSON.stringify({ verdict: 'WIN' }))).status, 400)
+      assert.equal((await apiJson(`/api/scenarios/${scenarioId}/reviews/${rv.id}/grade`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verdict: 'HIT' }) })).status, 404)
     })
 
-    await step('12-13. Reload: all data persists (market, scenario, reviews, outcome, route)', async () => {
+    await step('12-13. Reload: all data persists (market, scenario, reviews, outcome, grades, route)', async () => {
       await page.reload()
       await page.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
       assert.ok(page.url().includes(`#/journal/${scenarioId}`))
       assert.equal(await page.getByTestId('outcome-result').getByTestId('r-multiple').innerText(), '+2.00R')
+      await page.getByTestId('grading-progress').getByText('採点済み 2 / 2').waitFor()
+      assert.deepEqual((await page.getByTestId('review-grading').getByTestId('verdict-badge').allInnerTexts()).sort(), ['的中', '外れ'].sort())
+      if (isolated) await page.getByTestId('scorecard').getByTestId('overall-hit-rate').getByText('50%').waitFor()
       await nav('AI Court')
       await page.getByTestId('review-compare').getByTestId('review-card').nth(1).waitFor()
       assert.equal(await page.getByTestId('review-card').count(), 2)
@@ -285,6 +343,53 @@ async function main() {
         assert.ok(overflow <= 0, `${route}: horizontal overflow ${overflow}px`)
         await m.screenshot({ path: join(outDir, `mobile-0${i + 1}-${route}.png`), fullPage: true })
       }
+      await mctx.close()
+    })
+
+    await step('Phone (390x844, touch): bottom tab bar, scenario picker, card tables and grading by tap', async () => {
+      // Second synthetic scenario: SHORT that lost -1R, with one BEAR review, prepared via the local API.
+      const post = (path, body) => apiJson(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const short = (await post('/api/scenarios', { symbol: 'USDJPY', timeframe: '1d', side: 'SHORT', entry: 152, stop: 153, target: 150, thesis: 'Synthetic E2E phone thesis: hypothetical failed rally', invalidation: 'Synthetic daily close above 153' })).body.scenario
+      await post(`/api/scenarios/${short.id}/reviews`, { provider: 'grok', role: 'BEAR', content: 'Synthetic pasted BEAR answer: rally may extend' })
+      await post(`/api/scenarios/${short.id}/paper-outcome`, { exitPrice: 153, exitReason: 'STOP' })
+
+      const mctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+      const m = await mctx.newPage()
+      await m.goto(`${base}/#/journal/${scenarioId}`)
+      await m.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
+      // Tab bar is pinned to the bottom edge and tappable.
+      const navBox = await m.getByRole('navigation', { name: '画面' }).boundingBox()
+      assert.ok(navBox && Math.abs(navBox.y + navBox.height - 844) <= 1, `tab bar not at bottom: ${JSON.stringify(navBox)}`)
+      await m.mouse.wheel(0, 3000)
+      const navAfterScroll = await m.getByRole('navigation', { name: '画面' }).boundingBox()
+      assert.ok(navAfterScroll && navAfterScroll.y + navAfterScroll.height <= 845, 'tab bar scrolled away')
+      // Select the other scenario with the phone picker.
+      await m.getByTestId('mobile-scenario-picker').selectOption(short.id)
+      await m.waitForURL(new RegExp(`#/journal/${short.id}`))
+      const grading = m.getByTestId('review-grading')
+      const card = grading.getByRole('article', { name: /Grok BEAR/ })
+      await card.waitFor()
+      const hit = card.getByRole('button', { name: /的中/ })
+      assert.equal(await hit.getAttribute('aria-pressed'), 'true', 'loss => BEAR HIT suggested')
+      const box = await hit.boundingBox()
+      assert.ok(box && box.height >= 44, `verdict button too small: ${box?.height}`)
+      await hit.tap()
+      await card.getByRole('button', { name: '採点を保存' }).tap()
+      const status = m.getByRole('status').getByText(/GrokのBEARレビューを「的中」/)
+      await status.waitFor()
+      assert.ok(await status.isVisible() && (await status.boundingBox()).y >= 0, 'sticky alert not visible')
+      if (isolated) await m.getByTestId('scorecard').getByTestId('warned-losses').getByText('1').waitFor()
+      // Tables render as stacked cards on phones (no horizontal scrolling table).
+      assert.equal(await m.locator('[data-testid=journal-table] thead').isVisible(), false)
+      const cell = m.getByTestId('journal-table').locator('tbody tr td').first()
+      assert.equal(await cell.evaluate((td) => getComputedStyle(td, '::before').content), '"作成"')
+      assert.equal(await cell.evaluate((td) => getComputedStyle(td.parentElement).display), 'block')
+      const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      assert.ok(overflow <= 0, `journal grading: horizontal overflow ${overflow}px`)
+      await m.screenshot({ path: join(outDir, 'mobile-05-grading.png'), fullPage: true })
+      await m.getByRole('navigation', { name: '画面' }).getByRole('button', { name: 'AI Court' }).tap()
+      await m.locator('.panel h2').filter({ hasText: /AI Court/ }).waitFor()
+      await m.getByTestId('review-compare').getByTestId('verdict-badge').getByText('的中').waitFor()
       await mctx.close()
     })
 

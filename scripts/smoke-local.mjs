@@ -5,9 +5,9 @@ const u = new URL(base)
 if (!['127.0.0.1', 'localhost'].includes(u.hostname) || u.protocol !== 'http:') {
   throw new Error('Smoke test is restricted to loopback HTTP. No remote URL is allowed.')
 }
-async function call(path, body, expected = 200, headers = {}) {
+async function call(path, body, expected = 200, headers = {}, method) {
   const res = await fetch(base + path, {
-    method: body === undefined ? 'GET' : 'POST',
+    method: method ?? (body === undefined ? 'GET' : 'POST'),
     headers: { 'Content-Type': 'application/json', ...headers },
     body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),
   })
@@ -36,6 +36,8 @@ const { review } = await call(`/api/scenarios/${scenario.id}/reviews`, {
   content: 'Synthetic manually pasted test response: no verified market data.',
 }, 201)
 check(review.role === 'BEAR', 'Review role mismatch')
+// Grading is refused until a paper outcome exists.
+await call(`/api/scenarios/${scenario.id}/reviews/${review.id}/grade`, { verdict: 'MISS' }, 409, {}, 'PUT')
 const { outcome } = await call(`/api/scenarios/${scenario.id}/paper-outcome`, {
   exitPrice: 151.4, note: 'Synthetic paper-close only',
 }, 201)
@@ -46,6 +48,10 @@ await call(`/api/scenarios/${scenario.id}/paper-outcome`, {
 const detail = await call(`/api/scenarios/${scenario.id}`)
 check(detail.reviews.length === 1 && detail.outcome?.rMultiple === 2, 'Failed to persist reviews/outcome')
 await call('/api/scenarios/not-a-real-id', undefined, 404)
+const graded = await call(`/api/scenarios/${scenario.id}/reviews/${review.id}/grade`, { verdict: 'MISS', note: 'Synthetic smoke grade' }, 200, {}, 'PUT')
+check(graded.review.grade?.verdict === 'MISS', 'Grade not stored')
+await call(`/api/scenarios/${scenario.id}/reviews/${review.id}/grade`, { verdict: 'WRONG' }, 400, {}, 'PUT')
+check((await call(`/api/scenarios/${scenario.id}`)).reviews[0].grade?.verdict === 'MISS', 'Grade not persisted')
 await call('/api/scenarios', '{malformed', 400)
 await call('/api/scenarios', { symbol: 'USDJPY' }, 400)
 await call('/api/scenarios', payload, 403, { Origin: 'https://evil.example' })
@@ -55,7 +61,7 @@ const a = await call('/api/scenarios', payload, 201, { 'Idempotency-Key': key })
 const b = await call('/api/scenarios', payload, 200, { 'Idempotency-Key': key })
 check(a.scenario.id === b.scenario.id && b.replayed === true, 'Idempotency-Key did not deduplicate')
 const journal = await call('/api/journal')
-check(journal.kind === 'paper' && journal.entries.some((e) => e.scenario.id === scenario.id && e.outcome?.rMultiple === 2), 'Journal missing outcome')
+check(journal.kind === 'paper' && journal.scorecard?.overall.graded >= 1 && journal.entries.some((e) => e.scenario.id === scenario.id && e.outcome?.rMultiple === 2), 'Journal missing outcome')
 const { dataset } = await call('/api/market/datasets', {
   symbol: 'USDJPY', timeframe: '1d', sourceName: 'smoke-synthetic.csv', sourceNote: 'SYNTHETIC smoke data',
   candles: [
@@ -65,5 +71,5 @@ const { dataset } = await call('/api/market/datasets', {
 }, 201)
 check(dataset.verified === false && dataset.stats.high === 151.2, 'Market dataset stats wrong')
 await call('/api/market/datasets', { symbol: 'USDJPY', timeframe: '1d', sourceName: 'x', candles: [] }, 400)
-console.log('PASS: TradeCourt local API CRUD / validation / paper outcome / journal / market / idempotency. Scenario ID:', scenario.id)
+console.log('PASS: TradeCourt local API CRUD / validation / paper outcome / grading / journal / market / idempotency. Scenario ID:', scenario.id)
 console.log('NOTE: synthetic records persist in local D1; no browser UI was tested.')
