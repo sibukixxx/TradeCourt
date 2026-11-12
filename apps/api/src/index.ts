@@ -3,6 +3,9 @@ import { bodyLimit } from 'hono/body-limit'
 import {
   calculatePaperRMultiple,
   calculateRiskReward,
+  candleCloseTime,
+  candleTime,
+  evaluatePath,
   marketDatasetInputSchema,
   paperOutcomeInputSchema,
   reviewGradeInputSchema,
@@ -18,6 +21,7 @@ import {
   type Verdict,
   type MarketDataset,
   type MarketDatasetMeta,
+  type MarketRef,
   type PaperOutcome,
   type Provider,
   type Review,
@@ -40,6 +44,9 @@ type ScenarioRow = {
   thesis: string
   invalidation: string
   created_at: string
+  dataset_id: string | null
+  as_of_candle: string | null
+  as_of_at: string | null
 }
 type ReviewRow = {
   id: string
@@ -73,6 +80,7 @@ type DatasetRow = {
   last_date: string
   candles_json?: string
   imported_at: string
+  tz_offset: string | null
 }
 
 const scenarioDto = (r: ScenarioRow): Scenario => ({
@@ -87,6 +95,9 @@ const scenarioDto = (r: ScenarioRow): Scenario => ({
   invalidation: r.invalidation,
   createdAt: r.created_at,
   riskReward: calculateRiskReward(r),
+  marketRef: r.dataset_id && r.as_of_candle && r.as_of_at
+    ? { datasetId: r.dataset_id, asOfDate: r.as_of_candle, asOfAt: r.as_of_at }
+    : null,
 })
 const reviewDto = (r: ReviewRow): Review => ({
   id: r.id,
@@ -116,6 +127,7 @@ const datasetMeta = (r: DatasetRow): MarketDatasetMeta => ({
   sourceName: r.source_name,
   sourceNote: r.source_note,
   candleCount: r.candle_count,
+  tzOffset: r.tz_offset,
   firstDate: r.first_date,
   lastDate: r.last_date,
   importedAt: r.imported_at,
@@ -154,7 +166,8 @@ const isUniqueViolation = (e: unknown) => e instanceof Error && /UNIQUE constrai
 const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?$/i
 const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?$/i
 
-app.use('/api/*', async (c, next) => {
+// Applied to every route (including `/`), not only /api.
+app.use('*', async (c, next) => {
   const host = c.req.header('Host') ?? new URL(c.req.url).host
   if (!LOOPBACK_HOST.test(host)) return c.json({ error: 'TradeCourt API is localhost-only' }, 403)
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
@@ -172,6 +185,14 @@ const tooLarge = (c: AppContext) => c.json({ error: 'Request body too large' }, 
 app.use('/api/market/*', bodyLimit({ maxSize: 1024 * 1024, onError: tooLarge }))
 app.use('/api/scenarios/*', bodyLimit({ maxSize: 64 * 1024, onError: tooLarge }))
 app.use('/api/scenarios', bodyLimit({ maxSize: 64 * 1024, onError: tooLarge }))
+
+// ---- Root: this port is the API only; the UI is served by Vite on :5173 --------------------
+app.get('/', (c) => c.json({
+  service: 'TradeCourt local API (no UI on this port)',
+  web: 'http://127.0.0.1:5173',
+  health: '/api/health',
+  note: 'Open the web app on port 5173. This API is localhost-only and has no authentication.',
+}))
 
 // ---- Health ---------------------------------------------------------------------------------
 app.get('/api/health', async (c) => {
@@ -205,15 +226,31 @@ app.post('/api/scenarios', async (c) => {
   const prior = await replay()
   if (prior) return prior
 
-  const s = input.data
+  const { marketRef: refInput, ...s } = input.data
+  let marketRef: MarketRef | null = null
+  if (refInput) {
+    // The as-of candle must exist in the referenced dataset; its close instant is fixed now.
+    const ds = await c.env.DB.prepare('SELECT * FROM market_datasets WHERE id = ?').bind(refInput.datasetId).first<DatasetRow>()
+    if (!ds) return c.json({ error: 'Invalid scenario', issues: [{ path: 'marketRef.datasetId', message: 'Market dataset not found' }] }, 400)
+    const candles = JSON.parse(ds.candles_json ?? '[]') as Candle[]
+    if (!candles.some((k) => k.date === refInput.asOfDate)) {
+      return c.json({ error: 'Invalid scenario', issues: [{ path: 'marketRef.asOfDate', message: 'asOfDate is not a candle in that dataset' }] }, 400)
+    }
+    marketRef = {
+      datasetId: ds.id,
+      asOfDate: refInput.asOfDate,
+      asOfAt: new Date(candleCloseTime(refInput.asOfDate, ds.timeframe, ds.tz_offset)).toISOString(),
+    }
+  }
   const id = crypto.randomUUID()
   const createdAt = new Date().toISOString()
   try {
     await c.env.DB.prepare(
       `INSERT INTO scenarios
-        (id,symbol,timeframe,side,entry,stop,target,thesis,invalidation,created_at,client_request_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    ).bind(id, s.symbol, s.timeframe, s.side, s.entry, s.stop, s.target, s.thesis, s.invalidation, createdAt, key ?? null).run()
+        (id,symbol,timeframe,side,entry,stop,target,thesis,invalidation,created_at,client_request_id,dataset_id,as_of_candle,as_of_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(id, s.symbol, s.timeframe, s.side, s.entry, s.stop, s.target, s.thesis, s.invalidation, createdAt, key ?? null,
+      marketRef?.datasetId ?? null, marketRef?.asOfDate ?? null, marketRef?.asOfAt ?? null).run()
   } catch (e) {
     if (isUniqueViolation(e)) {
       const raced = await replay()
@@ -221,7 +258,7 @@ app.post('/api/scenarios', async (c) => {
     }
     throw e
   }
-  return c.json({ scenario: { ...s, id, createdAt, riskReward: calculateRiskReward(s) } satisfies Scenario }, 201)
+  return c.json({ scenario: { ...s, id, createdAt, riskReward: calculateRiskReward(s), marketRef } satisfies Scenario }, 201)
 })
 
 app.get('/api/scenarios/:id', async (c) => {
@@ -332,6 +369,48 @@ app.post('/api/scenarios/:id/paper-outcome', async (c) => {
   return c.json({ outcome }, 201)
 })
 
+// ---- Path check: which level did the user's own CSV touch first after the as-of candle --------
+// Computed on demand (never stored). Reference only: user-imported, unverified candles; no spread/fees.
+app.get('/api/scenarios/:id/path-check', async (c) => {
+  const row = await c.env.DB.prepare('SELECT * FROM scenarios WHERE id = ?').bind(c.req.param('id')).first<ScenarioRow>()
+  if (!row) return c.json({ error: 'Scenario not found' }, 404)
+  const scenario = scenarioDto(row)
+  if (!scenario.marketRef) return c.json({ error: 'Scenario is not linked to imported market data' }, 409)
+  const asOfAtMs = Date.parse(scenario.marketRef.asOfAt)
+
+  const { results: metas } = await c.env.DB.prepare(
+    `SELECT id,symbol,timeframe,source_name,source_note,candle_count,first_date,last_date,imported_at,tz_offset
+       FROM market_datasets WHERE symbol = ? ORDER BY imported_at DESC, id DESC LIMIT 50`,
+  ).bind(scenario.symbol).all<DatasetRow>()
+  // Candidates: datasets containing at least one candle that opens at/after the as-of close.
+  const candidates = metas.filter((m) => candleTime(m.last_date, m.tz_offset ?? '+00:00') >= asOfAtMs)
+  const requested = c.req.query('datasetId')
+  const chosenId = requested ?? candidates[0]?.id ?? scenario.marketRef.datasetId
+  const ds = await c.env.DB.prepare('SELECT * FROM market_datasets WHERE id = ?').bind(chosenId).first<DatasetRow>()
+  if (!ds) return c.json({ error: 'Dataset not found' }, 404)
+  if (ds.symbol !== scenario.symbol) return c.json({ error: 'Dataset symbol does not match the scenario' }, 400)
+
+  const candles = JSON.parse(ds.candles_json ?? '[]') as Candle[]
+  const evaluation = evaluatePath(scenario, candles, ds.tz_offset, asOfAtMs)
+  // Chart window: up to 40 candles before the as-of close through 10 after the deciding candle.
+  const firstAfter = candles.findIndex((k) => candleTime(k.date, ds.tz_offset ?? '+00:00') >= asOfAtMs)
+  const decidedIndex = evaluation.decidedDate ? candles.findIndex((k) => k.date === evaluation.decidedDate) : -1
+  const pivot = firstAfter === -1 ? candles.length : firstAfter
+  const start = Math.max(0, pivot - 40)
+  const end = Math.min(candles.length, (decidedIndex === -1 ? pivot : decidedIndex + 1) + 10, start + 400)
+  return c.json({
+    evaluation,
+    dataset: datasetMeta(ds),
+    candidates: candidates.map(datasetMeta),
+    chart: {
+      candles: candles.slice(start, end),
+      firstAfterIndex: firstAfter === -1 ? null : firstAfter - start,
+      decidedIndex: decidedIndex === -1 ? null : decidedIndex - start,
+    },
+    kind: 'reference',
+  })
+})
+
 // ---- Post-hoc review grading (答え合わせ) ------------------------------------------------
 // Only after a paper outcome exists. Re-grading overwrites the verdict (it is the user's own
 // judgment, not a trade record); the paper outcome itself stays immutable.
@@ -417,7 +496,7 @@ app.get('/api/journal', async (c) => {
 // ---- Market datasets (imported CSV snapshots) ---------------------------------------------
 app.get('/api/market/datasets', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT id,symbol,timeframe,source_name,source_note,candle_count,first_date,last_date,imported_at
+    `SELECT id,symbol,timeframe,source_name,source_note,candle_count,first_date,last_date,imported_at,tz_offset
        FROM market_datasets ORDER BY imported_at DESC, id DESC LIMIT 50`,
   ).all<DatasetRow>()
   return c.json({ datasets: results.map(datasetMeta) })
@@ -461,14 +540,15 @@ app.post('/api/market/datasets', async (c) => {
     last_date: d.candles[d.candles.length - 1].date,
     candles_json: JSON.stringify(d.candles),
     imported_at: new Date().toISOString(),
+    tz_offset: d.tzOffset ?? null,
   }
   try {
     await c.env.DB.prepare(
       `INSERT INTO market_datasets
-        (id,symbol,timeframe,source_name,source_note,candle_count,first_date,last_date,candles_json,imported_at,client_request_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        (id,symbol,timeframe,source_name,source_note,candle_count,first_date,last_date,candles_json,imported_at,client_request_id,tz_offset)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).bind(row.id, row.symbol, row.timeframe, row.source_name, row.source_note, row.candle_count,
-      row.first_date, row.last_date, row.candles_json, row.imported_at, key ?? null).run()
+      row.first_date, row.last_date, row.candles_json, row.imported_at, key ?? null, row.tz_offset).run()
   } catch (e) {
     if (isUniqueViolation(e)) {
       const raced = await replay()

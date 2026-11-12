@@ -264,3 +264,105 @@ describe('post-hoc review grading (答え合わせ)', () => {
     expect(cross.status).toBe(403)
   })
 })
+
+describe('root guidance', () => {
+  it('explains that the UI is on :5173 and still enforces the localhost guard', async () => {
+    const { status, data } = await call('/')
+    expect(status).toBe(200)
+    expect(data).toMatchObject({ web: 'http://127.0.0.1:5173', health: '/api/health' })
+    const res = await app.request('http://evil.example/', { headers: { Host: 'evil.example' } }, env)
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('market link and path check (synthetic candles)', () => {
+  // Daily JST candles. LONG entry 150 / stop 149 / target 152 (R:R 2).
+  const jst = [
+    { date: '2026-01-05', open: 149.8, high: 150.3, low: 149.6, close: 150.0 },
+    { date: '2026-01-06', open: 150.0, high: 151.0, low: 149.4, close: 150.6 },
+    { date: '2026-01-07', open: 150.6, high: 152.2, low: 150.4, close: 152.0 },
+  ]
+  const importJst = async () => (await call('/api/market/datasets', { body: { symbol: 'USDJPY', timeframe: '1d', sourceName: 'synthetic-jst.csv', tzOffset: '+09:00', candles: jst } })).data.dataset
+  const linked = (datasetId: string, asOfDate: string) => createScenario({ entry: 150, stop: 149, target: 152, marketRef: { datasetId, asOfDate } })
+
+  it('stores tzOffset on datasets and rejects malformed offsets', async () => {
+    expect((await importJst()).tzOffset).toBe('+09:00')
+    expect((await call('/api/market/datasets', { body: { symbol: 'USDJPY', timeframe: '1d', sourceName: 'x.csv', tzOffset: 'JST', candles: jst } })).status).toBe(400)
+    const legacy = await call('/api/market/datasets', { body: { symbol: 'USDJPY', timeframe: '1d', sourceName: 'y.csv', candles: jst } })
+    expect(legacy.data.dataset.tzOffset).toBeNull()
+  })
+
+  it('links a scenario to an as-of candle and fixes the as-of close instant', async () => {
+    const ds = await importJst()
+    const { status, data } = await linked(ds.id, '2026-01-05')
+    expect(status).toBe(201)
+    // 2026-01-05 00:00 JST = 2026-01-04T15:00Z; daily close = +24h.
+    expect(data.scenario.marketRef).toEqual({ datasetId: ds.id, asOfDate: '2026-01-05', asOfAt: '2026-01-05T15:00:00.000Z' })
+    const detail = await call(`/api/scenarios/${data.scenario.id}`)
+    expect(detail.data.scenario.marketRef.asOfAt).toBe('2026-01-05T15:00:00.000Z')
+    const unlinked = await createScenario()
+    expect(unlinked.data.scenario.marketRef).toBeNull()
+  })
+
+  it('rejects links to unknown datasets or candles', async () => {
+    const ds = await importJst()
+    const missingDs = await linked('nope', '2026-01-05')
+    expect(missingDs.status).toBe(400)
+    expect(missingDs.data.issues[0].path).toBe('marketRef.datasetId')
+    const missingBar = await linked(ds.id, '2026-01-09')
+    expect(missingBar.status).toBe(400)
+    expect(missingBar.data.issues[0].path).toBe('marketRef.asOfDate')
+  })
+
+  it('evaluates candles after the as-of close: stop/target order, MFE/MAE and chart window', async () => {
+    const ds = await importJst()
+    const id = (await linked(ds.id, '2026-01-05')).data.scenario.id
+    const { status, data } = await call(`/api/scenarios/${id}/path-check`)
+    expect(status).toBe(200)
+    expect(data.kind).toBe('reference')
+    expect(data.dataset.id).toBe(ds.id)
+    // 01-06 touches 149.4 <= stop 149 ? no (149.4 > 149). 01-07 reaches 152.2 >= target.
+    expect(data.evaluation).toMatchObject({ outcome: 'TARGET_FIRST', decidedDate: '2026-01-07', barsChecked: 2, referenceR: 2, mfeR: 1, maeR: -0.6 })
+    expect(data.chart.firstAfterIndex).toBe(1)
+    expect(data.chart.decidedIndex).toBe(2)
+    expect(data.chart.candles).toHaveLength(3)
+  })
+
+  it('reports NO_DATA when nothing exists after the as-of candle, then uses a newer import', async () => {
+    const ds = await importJst()
+    const id = (await linked(ds.id, '2026-01-07')).data.scenario.id
+    const first = await call(`/api/scenarios/${id}/path-check`)
+    expect(first.data.evaluation.outcome).toBe('NO_DATA')
+    expect(first.data.candidates).toEqual([])
+    // A later UTC export of synthetic hourly bars: first bar 2026-01-07T15:00Z opens exactly at the as-of close.
+    const newer = (await call('/api/market/datasets', { body: { symbol: 'USDJPY', timeframe: '1h', sourceName: 'synthetic-later-utc.csv', tzOffset: '+00:00', candles: [
+      { date: '2026-01-07 14:00', open: 151.5, high: 153.0, low: 148.0, close: 150.0 }, // inside the as-of daily bar: ignored
+      { date: '2026-01-07 15:00', open: 150.0, high: 150.5, low: 148.9, close: 149.0 },
+      { date: '2026-01-07 16:00', open: 149.0, high: 152.5, low: 148.8, close: 152.0 },
+    ] } })).data.dataset
+    const second = await call(`/api/scenarios/${id}/path-check`)
+    expect(second.data.dataset.id).toBe(newer.id)
+    expect(second.data.candidates.map((d: any) => d.id)).toEqual([newer.id])
+    expect(second.data.evaluation).toMatchObject({ outcome: 'STOP_FIRST', decidedDate: '2026-01-07 15:00', barsChecked: 1 })
+    // Explicit dataset selection still works.
+    expect((await call(`/api/scenarios/${id}/path-check?datasetId=${ds.id}`)).data.evaluation.outcome).toBe('NO_DATA')
+  })
+
+  it('reports AMBIGUOUS when one candle spans both levels', async () => {
+    const ds = (await call('/api/market/datasets', { body: { symbol: 'USDJPY', timeframe: '1d', sourceName: 'amb.csv', candles: [
+      { date: '2026-02-02', open: 150, high: 150.5, low: 149.5, close: 150 },
+      { date: '2026-02-03', open: 150, high: 152.5, low: 148.5, close: 150 },
+    ] } })).data.dataset
+    const id = (await linked(ds.id, '2026-02-02')).data.scenario.id
+    expect((await call(`/api/scenarios/${id}/path-check`)).data.evaluation).toMatchObject({ outcome: 'AMBIGUOUS', referenceR: null })
+  })
+
+  it('returns 409 for unlinked scenarios and 404 for unknown ids', async () => {
+    const id = (await createScenario()).data.scenario.id
+    expect((await call(`/api/scenarios/${id}/path-check`)).status).toBe(409)
+    expect((await call('/api/scenarios/missing/path-check')).status).toBe(404)
+    const ds = await importJst()
+    const linkedId = (await linked(ds.id, '2026-01-05')).data.scenario.id
+    expect((await call(`/api/scenarios/${linkedId}/path-check?datasetId=missing`)).status).toBe(404)
+  })
+})
