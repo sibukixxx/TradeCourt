@@ -55,7 +55,8 @@ async function startIsolatedStack() {
   const apiDir = join(root, 'apps/api')
   const wrangler = join(apiDir, 'node_modules/.bin/wrangler')
   await exec(wrangler, ['d1', 'migrations', 'apply', 'trade-court-local', '--local', '--persist-to', tempState], { cwd: apiDir, env: { ...process.env, CI: '1' } })
-  const api = run(wrangler, ['dev', '--local', '--port', '8798', '--ip', '127.0.0.1', '--persist-to', tempState, '--inspector-port', '0'], { cwd: apiDir })
+  // QUOTE_PROVIDER=synthetic: the 現在値を取得 button returns a labelled fixed value with no network.
+  const api = run(wrangler, ['dev', '--local', '--port', '8798', '--ip', '127.0.0.1', '--persist-to', tempState, '--inspector-port', '0', '--var', 'QUOTE_PROVIDER:synthetic'], { cwd: apiDir })
   children.push(api)
   await waitFor('http://127.0.0.1:8798/api/health').catch((e) => { throw new Error(e.message + '\n' + api.getLog()) })
   const webDir = join(root, 'apps/web')
@@ -168,6 +169,19 @@ async function main() {
     await step('3-4. Scenario: R:R is auto-calculated, direction errors shown, save persists', async () => {
       await nav('Scenario')
       const form = page.getByRole('form', { name: 'シナリオ登録' })
+      // Entry defaults to the latest imported CSV close (no network), with its source shown.
+      await page.getByTestId('entry-source').getByText(/初期値: 取込CSV/).waitFor()
+      if (isolated) {
+        assert.equal(await form.locator('input[name=entry]').inputValue(), '150.4')
+        assert.match(await page.getByTestId('entry-source').innerText(), /synthetic-usdjpy\.csv」の 2026-01-08 終値（現在値ではありません）/)
+        // Optional quote only on click (synthetic provider in the isolated stack: no network).
+        await page.getByTestId('fetch-quote').click()
+        await page.getByTestId('entry-source').getByText(/SYNTHETIC TEST QUOTE/).waitFor()
+        assert.equal(await form.locator('input[name=entry]').inputValue(), '150.123')
+      } else {
+        assert.notEqual(await form.locator('input[name=entry]').inputValue(), '')
+        await page.getByTestId('fetch-quote').waitFor() // present; not clicked against a real provider
+      }
       await form.locator('input[name=entry]').fill('150.2')
       await form.locator('input[name=stop]').fill('151')
       await form.locator('input[name=target]').fill('151.4')
