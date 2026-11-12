@@ -65,6 +65,17 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 - Path comparison uses the same default dataset as the Journal (newest import with later candles): gap = paper R − reference R; within ±0.05R counts as matched; ambiguous / open / no-data / unlinked scenarios are excluded and counted separately.
 - Grading suggestions: "結果より" (paper R sign) and "値動きより" (path TARGET_FIRST → BULL hit, STOP_FIRST → BEAR hit); the path one is preselected when available. The user decides.
 
+## Level drafts (`packages/core/src/levels.ts`)
+- The user picks LONG/SHORT; the code never suggests a direction.
+- Uses only candles up to and including the as-of candle. Entry = as-of close.
+- SWING stop: beyond the low (LONG) / high (SHORT) of the last 20 candles by max(0.02, 0.1×ATR); returns nothing if the close is itself that extreme.
+- ATR stop: 1.5×ATR(14) (simple average true range; needs ≥15 candles).
+- Target: chosen R multiple (1.5/2/3) of the stop distance; the opposite swing extreme is shown as an alternative when it lies on the profit side.
+- Thesis/invalidation drafts contain only facts from the CSV and the rule used, prefixed 【自動下書き・要編集】.
+
+## Schema version check
+- `apps/api/src/schema.ts` `REQUIRED_MIGRATION` must equal the newest file in `apps/api/migrations` (test-enforced). `/api/health` returns 503 `setup_required` until Wrangler has recorded it in `d1_migrations`. `make dev` / `make start` apply pending local migrations first.
+
 ## Testing
 - `pnpm test`: core unit tests + API route tests on `apps/api/test/d1-sqlite.ts`, a tiny D1 shim over Node's built-in `node:sqlite` that applies the real migration files.
 - `pnpm smoke:local`: loopback-only API smoke against the running Worker.
