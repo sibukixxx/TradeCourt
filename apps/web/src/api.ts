@@ -5,6 +5,7 @@ import type {
   MarketDatasetMeta,
   PaperOutcome,
   PaperOutcomeInput,
+  PathCheckResponse,
   Review,
   ReviewGradeInput,
   ReviewInput,
@@ -69,6 +70,9 @@ export const api = {
     { method: 'PUT', body: JSON.stringify(input) },
   ),
   journal: () => request<JournalResponse>('/api/journal'),
+  pathCheck: (scenarioId: string, datasetId?: string) => request<PathCheckResponse>(
+    `/api/scenarios/${encodeURIComponent(scenarioId)}/path-check${datasetId ? `?datasetId=${encodeURIComponent(datasetId)}` : ''}`,
+  ),
   datasets: () => request<{ datasets: MarketDatasetMeta[] }>('/api/market/datasets'),
   dataset: (id: string) => request<{ dataset: MarketDataset }>(`/api/market/datasets/${encodeURIComponent(id)}`),
   importDataset: (input: MarketDatasetInput, idempotencyKey: string) => request<{ dataset: MarketDataset }>(

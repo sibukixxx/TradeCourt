@@ -13,6 +13,7 @@ import {
 import { api } from '../api'
 import { getError, price, signed, timestamp } from '../format'
 import { ReviewGrading, Scorecard, VerdictBadge } from './ReviewGrading'
+import { PathCheck } from './PathCheck'
 
 const exitReasonLabels: Record<ExitReason, string> = {
   TARGET: '利確価格に到達',
@@ -133,6 +134,7 @@ export function JournalPanel({ detail, entries, summary, scorecard, loading, onS
               </form>
             )}
           </div>
+          <PathCheck detail={detail} onError={onError} />
           <ReviewGrading detail={detail} onSaved={onSaved} onError={onError} onNotice={onNotice} />
         </div>
       )}

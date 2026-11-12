@@ -99,6 +99,7 @@ export function CourtPanel({ detail, loading, onSaved, onError, onNotice }: Prop
                 <div className="case-prices"><span>ENTRY <strong>{price(selected.entry)}</strong></span><span>STOP <strong>{price(selected.stop)}</strong></span><span>TARGET <strong>{price(selected.target)}</strong></span></div>
                 <p>{selected.thesis}</p>
                 <div className="muted small">無効化条件: {selected.invalidation}</div>
+                {selected.marketRef && <div className="muted small" data-testid="court-as-of">仮説時点: {selected.marketRef.asOfDate} の足の終値（取込CSVに紐付け）</div>}
               </div>
               <h3>1. 役割を選んでプロンプトを生成</h3>
               <div className="role-switch" role="group" aria-label="AIの役割">
