@@ -23,6 +23,7 @@
 - [x] Data export (JSON/CSV) and SQL backup/restore (`make db-backup` / `db-restore`).
 - [x] Decision-habit analysis (Insights): rule adherence, exit reasons, plan vs CSV path gaps, cumulative paper R.
 - [x] Rule-based level drafts from imported candles (swing / ATR stop, R target) and one-tap paper outcomes.
+- [x] Entry default from the latest imported CSV close; optional user-pressed ECB daily reference quote (QUOTE_PROVIDER, can be off).
 - [ ] Strategy tags on scenarios for per-setup analysis.
 
 ## P2 — use outside localhost

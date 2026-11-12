@@ -4,14 +4,14 @@ A local-first **trade-decision review workspace**. Record a hypothetical USD/JPY
 
 トレード仮説をAIに反証させ、仮想取引の結果と比較するローカル専用アプリです。
 
-**Not included (by design):** AI API keys, browser automation of AI sites, session cookies, broker integration, order execution, live market data, trading signals or return claims. Paper outcomes are user-entered, never broker fills.
+**Not included (by design):** AI API keys, browser automation of AI sites, session cookies, broker integration, order execution, live/real-time market data (the only external request is the optional, user-pressed 現在値を取得 below), trading signals or return claims. Paper outcomes are user-entered, never broker fills.
 
 ## Screens
 
 | Screen | What it does |
 | --- | --- |
 | **01 Market Lens** | Import a local OHLC CSV (USD/JPY, `date,open,high,low,close`, ascending, ≤5,000 rows, ≤2 MB). Shows close-price chart, period high/low (with dates), change and % change, data period, source file and import time. Invalid / oversized CSV is rejected. Imported snapshots persist in local D1, flagged `verified: false`. No live prices. The timezone of the CSV timestamps is a required choice at import (fixed UTC offset such as JST +09:00, or "unknown" = treated as UTC and flagged). |
-| **02 Scenario** | LONG/SHORT, 1h/4h/1d, Entry/Stop/Target with live R:R and direction check, entry thesis and invalidation condition. Saved scenarios are immutable and listed. Optionally link the scenario to an imported CSV candle ("as-of": the hypothesis is formed at that candle's close); the form shows the as-of close, can copy it into Entry and charts the levels. The link is part of the immutable snapshot. **Auto draft:** after linking a CSV candle, pick only the direction; Entry (as-of close), Stop (just beyond the recent 20-candle low/high, or 1.5×ATR(14)) and Target (1.5/2/3R) plus thesis/invalidation drafts are filled by fixed rules on past candles — clearly labelled 【自動下書き・要編集】, never a buy/sell recommendation. **R buttons** (1/1.5/2/3R) set the target from Entry/Stop even without CSV. |
+| **02 Scenario** | LONG/SHORT, 1h/4h/1d, Entry/Stop/Target with live R:R and direction check, entry thesis and invalidation condition. Saved scenarios are immutable and listed. Optionally link the scenario to an imported CSV candle ("as-of": the hypothesis is formed at that candle's close); the form shows the as-of close, can copy it into Entry and charts the levels. The link is part of the immutable snapshot. **Auto draft:** after linking a CSV candle, pick only the direction; Entry (as-of close), Stop (just beyond the recent 20-candle low/high, or 1.5×ATR(14)) and Target (1.5/2/3R) plus thesis/invalidation drafts are filled by fixed rules on past candles — clearly labelled 【自動下書き・要編集】, never a buy/sell recommendation. **R buttons** (1/1.5/2/3R) set the target from Entry/Stop even without CSV. **Entry default:** the last close of the most recent imported CSV candle (no network, source shown). **現在値を取得:** only when pressed, the local API fetches the ECB daily USD/JPY reference rate (api.frankfurter.dev, no key, published once per business day — not real-time) and shows its date/source. Disable with `QUOTE_PROVIDER=off` (see below). |
 | **03 AI Court** | Generates BULL (賛成) / BEAR (反対) prompts from the saved scenario, one-click copy, opens the official ChatGPT / Claude / Gemini / Grok site in a new tab. You paste the answer back; provider, role, answer time and save time are stored. BULL vs BEAR side-by-side comparison and provider × role matrix. Pasted text is rendered as plain text (never HTML). |
 | **04 Journal** | Shows the scenario snapshot and its AI reviews, records one immutable paper exit (price, exit reason, rule adherence, reflection), computes the R multiple, compares plan vs. actual decision, and lists the full decision history with paper-only summary stats. **One-tap record:** 利確で終了 / 損切りで終了 / 建値で撤退 buttons (the one matching the CSV path is marked), then one confirm tap — the record is immutable, so a mis-tap can be cancelled before saving. Other prices: manual input below. |
 | **答え合わせ (in Journal)** | After the paper exit is recorded, grade each pasted AI review as 的中 / 外れ / 判定不能 with an optional note (suggestion: profit → BULL hit, loss → BEAR hit; you decide, and can re-grade). A scorecard shows hit rate per AI × BULL/BEAR (判定不能 excluded), reviews awaiting a grade, and losses where a BEAR warning was graded a hit. Grades are your own judgment against paper results, not market verification. |
@@ -66,7 +66,7 @@ Latest run: 2026-11-12, Linux cloud container (Node v22.23.4, pnpm 10.23.0 via c
 | Check | Result |
 | --- | --- |
 | `pnpm install --frozen-lockfile` (fresh `node_modules`) | PASS |
-| `pnpm test` — core 56 tests, api 42 tests | PASS |
+| `pnpm test` — core 56 tests, api 49 tests | PASS |
 | `pnpm typecheck` / `pnpm build` | PASS |
 | `pnpm db:migrate:local` — 0003 applied on top of an already populated local DB; existing rows intact (ungraded) | PASS |
 | `pnpm dev` → `GET /api/health` on :8787 and via :5173 proxy | PASS |
@@ -77,12 +77,19 @@ Latest run: 2026-11-12, Linux cloud container (Node v22.23.4, pnpm 10.23.0 via c
 | Make targets: `start`/`stop`/`restart`/`status`/`logs`, port-conflict and unmigrated-DB refusal, no leftover processes after `stop` | PASS |
 | `make db-backup` → `db-reset CONFIRM=yes` (empty) → `db-restore` returns identical counts (14 scenarios / 13 reviews / 5 graded / 7 datasets) | PASS |
 | `make verify` (setup + test + typecheck + build + isolated E2E 17/17) | PASS |
+| Real 現在値を取得 in the browser: Entry set to the ECB reference rate (159.7, 2026-11-12) with date/source; the browser made 0 non-loopback requests (the local API fetched it) | PASS |
 | Health reports pending migrations (DB at 0003 → 503 with `make migrate` hint); `make start` auto-applies them | PASS |
 | Migration 0004 on an already populated local DB (17 existing scenarios intact, unlinked); market links persist across `make restart` | PASS |
 | `GET http://127.0.0.1:8787/` explains the UI is on :5173 (localhost guard applies) | PASS |
 | Logging into / sending prompts to real ChatGPT, Claude, Gemini, Grok | **NOT RUN** (intentionally manual; not automatable by policy) |
 | Real phone hardware (iOS Safari / Android Chrome) | **NOT RUN** (emulated 390×844 touch viewport in Chromium only) |
 | Owner's own workstation (macOS/Windows) fresh clone | **NOT RUN** here |
+
+## Optional reference quote (現在値を取得)
+- Default `QUOTE_PROVIDER=frankfurter` in `apps/api/wrangler.jsonc`: on button press only, the local Worker requests `https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY` (plain GET, no user data, 5 s timeout, response validated).
+- The value is the European Central Bank **daily reference rate**: not a live or tradeable price. The UI labels it with its date.
+- To disable all external quote requests, create `apps/api/.dev.vars` (gitignored) containing `QUOTE_PROVIDER=off` and restart (`make restart`). The button disappears.
+- The browser E2E uses `QUOTE_PROVIDER=synthetic` (a fixed SYNTHETIC value, no network).
 
 ## Security
 

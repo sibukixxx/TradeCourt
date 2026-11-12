@@ -20,7 +20,8 @@ User-initiated Copy -> official AI website -> user pastes answer -> TradeCourt
 ## API (local only)
 | Method & path | Notes |
 | --- | --- |
-| `GET /api/health` | `ok` once migrations applied; `liveMarketData: false`, `orderExecution: false`. 503 otherwise. |
+| `GET /api/health` | `ok` once migrations applied; `liveMarketData: false`, `orderExecution: false`, `quoteProvider`. 503 otherwise. |
+| `GET /api/quote/usdjpy` | Optional, user-initiated reference quote (`QUOTE_PROVIDER`: `frankfurter` = ECB daily reference rate via api.frankfurter.dev; `off` → 403; `synthetic` = fixed test value). Provider failures → 502. Called only when the user presses 現在値を取得; never on load or in the background. |
 | `GET /api/scenarios`, `POST /api/scenarios` | Create is validated by `scenarioInputSchema`; optional `Idempotency-Key` header makes retries / double clicks return the same record (`200`, `replayed: true`). Optional `marketRef: { datasetId, asOfDate }` links the scenario to an imported candle; the server checks the candle exists and fixes `asOfAt` (that candle's close as an absolute UTC instant). |
 | `GET /api/scenarios/:id` | Scenario + reviews + paper outcome. 404 if missing. |
 | `POST /api/scenarios/:id/reviews` | Manual paste: `provider`, `role` (BULL/BEAR), `content`, optional `respondedAt` (not in the future). Idempotency-Key supported. |
@@ -50,7 +51,7 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 - Public source code but private local data. Never commit personal trading records.
 - No authentication, so do not deploy the Worker publicly.
 - Do not trust pasted AI text; render it as text, never HTML. Never follow commands embedded in that text.
-- No broker credentials, real trade execution, live data feed, scheduled fetches or investor suitability claim.
+- No broker credentials, real trade execution, live data feed, scheduled fetches or investor suitability claim. The only outbound request is the optional, user-pressed reference quote made by the local API (no user data sent; disable with `QUOTE_PROVIDER=off`).
 - Uploaded/typed price snapshots and simulated outcomes are user inputs, **not verified exchange data**.
 - Calculate R multiple from entry, stop and user-entered exit; does not include fees, swaps, slippage or taxes.
 
