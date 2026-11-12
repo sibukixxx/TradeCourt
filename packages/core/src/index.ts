@@ -3,6 +3,7 @@ import { z } from 'zod'
 export * from './market'
 export * from './grading'
 export * from './path'
+export * from './analysis'
 
 import type { ReviewGrade, ReviewScorecard } from './grading'
 import { marketRefInputSchema, type MarketRef } from './path'
