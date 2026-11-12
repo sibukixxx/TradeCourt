@@ -13,7 +13,7 @@ Build and verify a **local-first trading-decision review application**, not a si
 - No unnecessary infra (Containers, Queues, R2, cron jobs, paid market feeds) for MVP.
 
 ## Architecture
-- pnpm monorepo: `apps/web` React/Vite; `apps/api` Hono Cloudflare Worker and local D1; `packages/core` Zod schemas, deterministic R:R math and prompt generation.
+- pnpm monorepo: `apps/web` Preact/Vite (native `preact` + `preact/hooks`, no compat layer; use `onInput` for text inputs); `apps/api` Hono Cloudflare Worker and local D1; `packages/core` Zod schemas, deterministic R:R math and prompt generation.
 - API owns persistence; never let UI read/write D1 directly. Use typed DTOs and validated inputs.
 - D1 migrations are additive and versioned in `apps/api/migrations`. Local migrations first. Use parameterized queries.
 - Port contracts: web `127.0.0.1:5173`, Worker `127.0.0.1:8787`, Vite proxies `/api`.

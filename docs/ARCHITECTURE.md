@@ -1,7 +1,7 @@
 # Architecture — local MVP
 
 ```text
-Browser (React/Vite 5173)
+Browser (Preact/Vite 5173)
   | same-origin /api (Vite dev proxy)
   v
 Hono Worker (Wrangler local 8787)
@@ -12,7 +12,7 @@ User-initiated Copy -> official AI website -> user pastes answer -> TradeCourt
 ```
 
 ## Roles
-- **Web** (`apps/web`): four screens (Market Lens, Scenario, AI Court, Journal), hash routing (`#/court/<id>`) so reload restores the view, loading/empty/error states, generated prompt text and official AI links. Talks only to relative `/api`.
+- **Web** (`apps/web`, Preact 10 + Vite 8; JSX via `jsxImportSource: "preact"`, no UI/router/state libraries): four screens (Market Lens, Scenario, AI Court, Journal), hash routing (`#/court/<id>`) so reload restores the view, loading/empty/error states, generated prompt text and official AI links. Talks only to relative `/api`.
 - **API** (`apps/api`): Zod validation, UUIDs, parameterized SQL, local D1 persistence, localhost guard.
 - **Core** (`packages/core`): Zod contracts, directional stop/target validation, R:R / paper R multiple, plan-vs-outcome comparison, journal summary, OHLC CSV parsing and stats, BULL/BEAR prompts. Shared by web and API.
 - **External AI**: *outside the application*. Subscription access is not a programmatic API. No cookies or conversation scraping.
