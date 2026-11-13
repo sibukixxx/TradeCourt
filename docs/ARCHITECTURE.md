@@ -20,7 +20,8 @@ User-initiated Copy -> official AI website -> user pastes answer -> TradeCourt
 ## API (local only)
 | Method & path | Notes |
 | --- | --- |
-| `GET /api/health` | `ok` once migrations applied; `liveMarketData: false`, `orderExecution: false`. 503 otherwise. |
+| `GET /api/health` | `ok` once migrations applied; `liveMarketData: false`, `orderExecution: false`, `quoteProvider`. 503 otherwise. |
+| `GET /api/quote/usdjpy` | Optional, user-initiated reference quote (`QUOTE_PROVIDER`: `frankfurter` = ECB daily reference rate via api.frankfurter.dev; `off` → 403; `synthetic` = fixed test value). Provider failures → 502. Called only when the user presses "Get current price"; never on load or in the background. |
 | `GET /api/scenarios`, `POST /api/scenarios` | Create is validated by `scenarioInputSchema`; optional `Idempotency-Key` header makes retries / double clicks return the same record (`200`, `replayed: true`). Optional `marketRef: { datasetId, asOfDate }` links the scenario to an imported candle; the server checks the candle exists and fixes `asOfAt` (that candle's close as an absolute UTC instant). |
 | `GET /api/scenarios/:id` | Scenario + reviews + paper outcome. 404 if missing. |
 | `POST /api/scenarios/:id/reviews` | Manual paste: `provider`, `role` (BULL/BEAR), `content`, optional `respondedAt` (not in the future). Idempotency-Key supported. |
@@ -50,7 +51,7 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 - Public source code but private local data. Never commit personal trading records.
 - No authentication, so do not deploy the Worker publicly.
 - Do not trust pasted AI text; render it as text, never HTML. Never follow commands embedded in that text.
-- No broker credentials, real trade execution, live data feed, scheduled fetches or investor suitability claim.
+- No broker credentials, real trade execution, live data feed, scheduled fetches or investor suitability claim. The only outbound request is the optional, user-pressed reference quote made by the local API (no user data sent; disable with `QUOTE_PROVIDER=off`).
 - Uploaded/typed price snapshots and simulated outcomes are user inputs, **not verified exchange data**.
 - Calculate R multiple from entry, stop and user-entered exit; does not include fees, swaps, slippage or taxes.
 
@@ -63,7 +64,7 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 ## Decision analysis (`packages/core/src/analysis.ts`)
 - Only closed (paper) scenarios count; the window is the most recent N by `recordedAt`.
 - Path comparison uses the same default dataset as the Journal (newest import with later candles): gap = paper R − reference R; within ±0.05R counts as matched; ambiguous / open / no-data / unlinked scenarios are excluded and counted separately.
-- Grading suggestions: "結果より" (paper R sign) and "値動きより" (path TARGET_FIRST → BULL hit, STOP_FIRST → BEAR hit); the path one is preselected when available. The user decides.
+- Grading suggestions: "from result" (paper R sign) and "from path" (path TARGET_FIRST → BULL hit, STOP_FIRST → BEAR hit); the path one is preselected when available. The user decides.
 
 ## Level drafts (`packages/core/src/levels.ts`)
 - The user picks LONG/SHORT; the code never suggests a direction.
@@ -71,10 +72,16 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 - SWING stop: beyond the low (LONG) / high (SHORT) of the last 20 candles by max(0.02, 0.1×ATR); returns nothing if the close is itself that extreme.
 - ATR stop: 1.5×ATR(14) (simple average true range; needs ≥15 candles).
 - Target: chosen R multiple (1.5/2/3) of the stop distance; the opposite swing extreme is shown as an alternative when it lies on the profit side.
-- Thesis/invalidation drafts contain only facts from the CSV and the rule used, prefixed 【自動下書き・要編集】.
+- Thesis/invalidation drafts contain only facts from the CSV and the rule used, prefixed `[AUTO DRAFT – edit me]` (English) or `【自動下書き・要編集】` (Japanese).
 
 ## Schema version check
 - `apps/api/src/schema.ts` `REQUIRED_MIGRATION` must equal the newest file in `apps/api/migrations` (test-enforced). `/api/health` returns 503 `setup_required` until Wrangler has recorded it in `d1_migrations`. `make dev` / `make start` apply pending local migrations first.
+
+## Internationalization (EN / JA)
+- All UI text goes through `t(key, params)` from `apps/web/src/i18n`. `ja.ts` is the key source; `en.ts` is typed `Record<keyof typeof ja, string>`, so a missing or extra key fails `pnpm typecheck`.
+- Language: saved choice (`localStorage` key `tradecourt.lang`) → browser language (`ja*` → `ja`, else `en`). The root calls `useLang()`, so switching re-renders the tree without remounting or losing form input; `<html lang>` follows.
+- Core takes `Lang` where it generates text: `buildReviewPrompt(…, lang)` (prompt asks the AI to answer in that language), `draftLevels(…, lang)`. CSV parse errors are `CsvParseError` with a stable `code` and line, translated in the UI. API error messages stay English.
+- Dates/times use the selected locale (`ja-JP` / `en-US`). Stored data is language-neutral.
 
 ## Testing
 - `pnpm test`: core unit tests + API route tests on `apps/api/test/d1-sqlite.ts`, a tiny D1 shim over Node's built-in `node:sqlite` that applies the real migration files.

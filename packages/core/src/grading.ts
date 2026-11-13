@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// Post-hoc grading ("答え合わせ") of manually pasted AI reviews against the user's own PAPER outcome.
+// Post-hoc grading of manually pasted AI reviews against the user's own PAPER outcome.
 // A verdict is the user's subjective judgment. It is not market verification of the AI's claims.
 
 export const verdictSchema = z.enum(['HIT', 'MISS', 'UNCLEAR'])

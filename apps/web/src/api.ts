@@ -7,6 +7,8 @@ import type {
   PaperOutcome,
   PaperOutcomeInput,
   PathCheckResponse,
+  Quote,
+  QuoteProvider,
   Review,
   ReviewGradeInput,
   ReviewInput,
@@ -14,6 +16,8 @@ import type {
   ScenarioDetail,
   ScenarioInput,
 } from '@tradecourt/core'
+
+import { t } from './i18n'
 
 // Same-origin relative /api only (Vite proxies to the loopback Worker). No external calls.
 
@@ -36,7 +40,7 @@ async function request<T>(path: string, options: RequestInit & { idempotencyKey?
       },
     })
   } catch {
-    throw new ApiError('ローカルAPIに接続できません。pnpm dev が起動しているか確認してください。', 0)
+    throw new ApiError(t('common.apiUnreachable'), 0)
   }
   const result: unknown = await response.json().catch(() => null)
   if (!response.ok) {
@@ -52,7 +56,9 @@ async function request<T>(path: string, options: RequestInit & { idempotencyKey?
 export const newRequestKey = () => crypto.randomUUID()
 
 export const api = {
-  health: () => request<{ status: string; mode: string }>('/api/health'),
+  health: () => request<{ status: string; mode: string; quoteProvider?: QuoteProvider }>('/api/health'),
+  /** User-initiated only ("Get current price"). The local API fetches the reference quote. */
+  quote: () => request<{ quote: Quote }>('/api/quote/usdjpy'),
   list: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
   create: (input: ScenarioInput, idempotencyKey: string) => request<{ scenario: Scenario }>('/api/scenarios', {
     method: 'POST', body: JSON.stringify(input), idempotencyKey,

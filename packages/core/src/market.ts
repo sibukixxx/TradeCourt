@@ -13,15 +13,15 @@ const NUMBER_PATTERN = /^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/
 /** Fixed UTC offset of the CSV's local timestamps, e.g. "+09:00" (JST). DST zones are not modelled. */
 export const tzOffsetSchema = z.string().regex(/^[+-](?:0\d|1[0-4]):(?:00|30|45)$/, 'tzOffset must look like +09:00')
 export type TzOffset = z.infer<typeof tzOffsetSchema>
-export const commonTzOffsets: { value: TzOffset; label: string }[] = [
-  { value: '+00:00', label: 'UTC (+00:00)' },
-  { value: '+09:00', label: '日本時間 JST (+09:00)' },
-  { value: '+08:00', label: '+08:00 (SGT/HKT)' },
-  { value: '+03:00', label: '+03:00 (MT4/MT5 夏時間に多い)' },
-  { value: '+02:00', label: '+02:00 (MT4/MT5 冬時間に多い)' },
-  { value: '+01:00', label: '+01:00 (CET)' },
-  { value: '-04:00', label: '-04:00 (米国東部 夏時間)' },
-  { value: '-05:00', label: '-05:00 (米国東部 冬時間)' },
+export const commonTzOffsets: { value: TzOffset; label: { en: string; ja: string } }[] = [
+  { value: '+00:00', label: { en: 'UTC (+00:00)', ja: 'UTC (+00:00)' } },
+  { value: '+09:00', label: { en: 'Japan JST (+09:00)', ja: '日本時間 JST (+09:00)' } },
+  { value: '+08:00', label: { en: '+08:00 (SGT/HKT)', ja: '+08:00 (SGT/HKT)' } },
+  { value: '+03:00', label: { en: '+03:00 (common MT4/MT5 summer time)', ja: '+03:00 (MT4/MT5 夏時間に多い)' } },
+  { value: '+02:00', label: { en: '+02:00 (common MT4/MT5 winter time)', ja: '+02:00 (MT4/MT5 冬時間に多い)' } },
+  { value: '+01:00', label: { en: '+01:00 (CET)', ja: '+01:00 (CET)' } },
+  { value: '-04:00', label: { en: '-04:00 (US Eastern, summer)', ja: '-04:00 (米国東部 夏時間)' } },
+  { value: '-05:00', label: { en: '-05:00 (US Eastern, winter)', ja: '-05:00 (米国東部 冬時間)' } },
 ]
 
 const EXPLICIT_OFFSET = /(?:Z|[+-]\d{2}:\d{2})$/
@@ -124,19 +124,29 @@ export type MarketDataset = MarketDatasetMeta & {
   stats: MarketStats
 }
 
+export type CsvErrorCode = 'TOO_FEW_ROWS' | 'TOO_MANY_ROWS' | 'MISSING_COLUMNS' | 'COLUMN_COUNT' | 'INVALID_ROW' | 'NOT_ASCENDING'
+
+/** CSV rejection with a stable code (UIs translate it) and the 1-based CSV line where relevant. */
+export class CsvParseError extends Error {
+  constructor(readonly code: CsvErrorCode, readonly line: number | null, message: string, readonly detail = '') {
+    super(message)
+    this.name = 'CsvParseError'
+  }
+}
+
 export function parseOhlcCsv(source: string): Candle[] {
   const lines = source.replace(/^﻿/, '').split(/\r?\n/).filter((line) => line.trim() !== '')
-  if (lines.length < 3) throw new Error('ヘッダーと少なくとも2行のOHLCデータが必要です')
-  if (lines.length > MAX_CANDLES + 1) throw new Error(`一度に読み込める足は最大${MAX_CANDLES.toLocaleString('en-US')}本です`)
+  if (lines.length < 3) throw new CsvParseError('TOO_FEW_ROWS', null, 'A header and at least 2 OHLC rows are required')
+  if (lines.length > MAX_CANDLES + 1) throw new CsvParseError('TOO_MANY_ROWS', null, `At most ${MAX_CANDLES.toLocaleString('en-US')} candles can be imported at once`)
   const header = lines[0].split(',').map((s) => s.trim().toLowerCase())
   const required = ['date', 'open', 'high', 'low', 'close'] as const
   const columns = required.map((field) => header.indexOf(field))
-  if (columns.some((index) => index === -1)) throw new Error('CSVには date,open,high,low,close の列が必要です')
+  if (columns.some((index) => index === -1)) throw new CsvParseError('MISSING_COLUMNS', 1, 'The CSV needs date,open,high,low,close columns')
   const [dateCol, openCol, highCol, lowCol, closeCol] = columns
   const candles: Candle[] = []
   for (const [i, line] of lines.slice(1).entries()) {
     const cells = line.split(',').map((s) => s.trim())
-    if (cells.length !== header.length) throw new Error(`CSV ${i + 2}行目の列数がヘッダーと一致しません`)
+    if (cells.length !== header.length) throw new CsvParseError('COLUMN_COUNT', i + 2, `CSV line ${i + 2}: column count does not match the header`)
     const nums = [openCol, highCol, lowCol, closeCol].map((index) => {
       const raw = cells[index]
       return raw && NUMBER_PATTERN.test(raw) ? Number(raw) : NaN
@@ -144,11 +154,14 @@ export function parseOhlcCsv(source: string): Candle[] {
     const parsed = candleSchema.safeParse({
       date: cells[dateCol], open: nums[0], high: nums[1], low: nums[2], close: nums[3],
     })
-    if (!parsed.success) throw new Error(`CSV ${i + 2}行目の値が不正です（${parsed.error.issues[0]?.message ?? 'invalid'}）`)
+    if (!parsed.success) {
+      const detail = parsed.error.issues[0]?.message ?? 'invalid'
+      throw new CsvParseError('INVALID_ROW', i + 2, `CSV line ${i + 2}: invalid values (${detail})`, detail)
+    }
     candles.push(parsed.data)
   }
   const bad = strictlyAscending(candles)
-  if (bad !== -1) throw new Error(`CSV ${bad + 2}行目: 日時は昇順かつ重複なしである必要があります`)
+  if (bad !== -1) throw new CsvParseError('NOT_ASCENDING', bad + 2, `CSV line ${bad + 2}: dates must be strictly ascending with no duplicates`)
   return candles
 }
 

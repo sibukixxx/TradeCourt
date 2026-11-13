@@ -8,7 +8,7 @@ Build and verify a **local-first trading-decision review application**, not a si
 - **No order placement, broker integration, live inventory/finance writes, guarantees of returns or auto-trading** in the MVP. Never label paper data as real executions.
 - Never fabricate candles, market prices, AI assessments or test results. All sample data must be clearly labeled synthetic.
 - Do not deploy the API publicly. There is no authentication yet. Wrangler must run locally only. Add auth, isolation and deployment safeguards as a separate, reviewed milestone.
-- Public repository: do not commit secrets, user trade journals, CSVs, screenshots, private prompts, tokens, .env files or local D1 state.
+- Public MIT-licensed repository: do not commit secrets, user trade journals, CSVs, screenshots, private prompts, tokens, .env files or local D1 state.
 - No new GitHub Actions workflows by default: control CI usage/cost. Run local tests.
 - No unnecessary infra (Containers, Queues, R2, cron jobs, paid market feeds) for MVP.
 
@@ -19,6 +19,8 @@ Build and verify a **local-first trading-decision review application**, not a si
 - Port contracts: web `127.0.0.1:5173`, Worker `127.0.0.1:8787`, Vite proxies `/api`.
 - Initially USD/JPY only, LONG/SHORT and 1h/4h/1d; extend via explicit contracts. A scenario becomes an immutable snapshot after creation.
 - Store AI responses **only after manual paste**, with provider and BULL/BEAR role metadata. An AI review is commentary, never verified market evidence.
+- External market data: only the optional, user-initiated reference quote (`GET /api/quote/usdjpy`, made by the API, never by the browser, never on load/background/schedule). Label it with provider, date and "not real-time"; keep `QUOTE_PROVIDER=off` working; tests use `synthetic` (no network). No paid feeds or keys.
+- i18n: every user-visible UI string goes through `t()` with keys in both `apps/web/src/i18n/ja.ts` and `en.ts` (type-checked). Core text generators take `Lang`. Docs and code comments are in English (README.ja.md is the Japanese overview).
 - Level drafts are deterministic rules applied to the user's own past candles; the user always chooses the direction. Never generate buy/sell recommendations.
 - An outcome is **user-entered paper data**, not an externally confirmed trade or broker fill. Keep this distinction in DB and UI.
 

@@ -6,6 +6,9 @@
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   "dev": { "ip": "127.0.0.1", "port": 8787 },
+  // Optional "Get current price" button: ECB daily reference rate via api.frankfurter.dev, fetched only
+  // when the user presses it. Set to "off" to disable all external quote requests.
+  "vars": { "QUOTE_PROVIDER": "frankfurter" },
   "d1_databases": [
     {
       "binding": "DB",

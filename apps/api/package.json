@@ -1,6 +1,7 @@
 {
   "name": "@tradecourt/api",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local",

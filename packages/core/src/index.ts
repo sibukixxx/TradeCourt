@@ -5,9 +5,12 @@ export * from './grading'
 export * from './path'
 export * from './analysis'
 export * from './levels'
+export * from './quote'
+export * from './lang'
 
 import type { ReviewGrade, ReviewScorecard } from './grading'
 import { marketRefInputSchema, type MarketRef } from './path'
+import type { Lang } from './lang'
 
 const positivePrice = z.number().finite().positive()
 
@@ -213,11 +216,14 @@ export function summarizeJournal(entries: Pick<JournalEntry, 'outcome'>[]): Jour
 export function buildReviewPrompt(
   scenario: ScenarioCore & { marketRef?: Pick<MarketRef, 'asOfDate'> | null },
   role: 'BULL' | 'BEAR',
+  lang: Lang = 'en',
 ): string {
-  const focus = role === 'BULL'
-    ? 'このトレード案が合理的になる条件を示し、同時に最も強い反論も提示してください。'
-    : 'このトレード案を採用しない理由を優先して探し、反証できる条件を提示してください。'
-  return `あなたはトレード判断の監査役です。売買の指示や利益保証は不要です。
+  const rr = calculateRiskReward(scenario)
+  if (lang === 'ja') {
+    const focus = role === 'BULL'
+      ? 'このトレード案が合理的になる条件を示し、同時に最も強い反論も提示してください。'
+      : 'このトレード案を採用しない理由を優先して探し、反証できる条件を提示してください。'
+    return `あなたはトレード判断の監査役です。売買の指示や利益保証は不要です。
 以下はユーザー入力の仮説であり、最新相場データではありません。リアルタイム価格や経済指標を確認できない場合、確認済みと主張しないでください。
 
 銘柄: ${scenario.symbol}
@@ -226,7 +232,7 @@ export function buildReviewPrompt(
 エントリー仮説: ${scenario.entry}
 損切り: ${scenario.stop}
 利確: ${scenario.target}
-リスクリワード: 1:${calculateRiskReward(scenario)}
+リスクリワード: 1:${rr}
 根拠: ${scenario.thesis}
 無効化条件: ${scenario.invalidation}${scenario.marketRef ? `\n仮説時点: ${scenario.marketRef.asOfDate} の足の終値時点（ユーザーが取り込んだCSVに基づく。最新相場ではありません）` : ''}
 
@@ -241,4 +247,32 @@ ${focus}
 5. 判断前に検証するチェック項目
 
 架空の根拠・価格・反発回数・ニュースを捏造しないでください。最終判断はユーザーが行います。`
+  }
+  const focus = role === 'BULL'
+    ? 'Explain the conditions under which this trade idea is reasonable, and also give the strongest counter-argument.'
+    : 'Look first for reasons NOT to take this trade, and state the conditions that would falsify it.'
+  return `You are an auditor of trading decisions. Do not give buy/sell instructions or promise profits.
+The following is a user-written hypothesis, not current market data. If you cannot verify real-time prices or economic data, do not claim that you have.
+
+Symbol: ${scenario.symbol}
+Timeframe: ${scenario.timeframe}
+Direction: ${scenario.side}
+Entry hypothesis: ${scenario.entry}
+Stop: ${scenario.stop}
+Target: ${scenario.target}
+Risk/reward: 1:${rr}
+Thesis: ${scenario.thesis}
+Invalidation: ${scenario.invalidation}${scenario.marketRef ? `\nAs of: close of the ${scenario.marketRef.asOfDate} candle (from a CSV the user imported; not current market data)` : ''}
+
+Role: ${role === 'BULL' ? 'BULL (argue for)' : 'BEAR (argue against)'}
+${focus}
+
+Answer in English using these headings:
+1. Strengths of the hypothesis
+2. Counter-evidence and unexpected risks
+3. Missing facts (mark them as unverified)
+4. Conditions under which to abandon this idea
+5. Checklist to verify before deciding
+
+Do not invent reasons, prices, bounce counts or news. The final decision is the user's.`
 }
