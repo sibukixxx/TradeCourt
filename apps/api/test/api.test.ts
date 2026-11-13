@@ -212,7 +212,7 @@ describe('market datasets', () => {
   })
 })
 
-describe('post-hoc review grading (答え合わせ)', () => {
+describe('post-hoc review grading', () => {
   async function setup() {
     const id = (await createScenario()).data.scenario.id
     const bull = (await call(`/api/scenarios/${id}/reviews`, { body: { provider: 'claude', role: 'BULL', content: 'Synthetic bull argument' } })).data.review

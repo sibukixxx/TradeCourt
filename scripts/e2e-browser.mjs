@@ -104,7 +104,8 @@ async function main() {
   const browser = await chromium.launch()
   const blocked = []
   const newContext = async (opts = {}) => {
-    const ctx = await browser.newContext({ deviceScaleFactor: 1, ...opts })
+    // Japanese browser locale by default (most assertions use the Japanese UI); the i18n step overrides it.
+    const ctx = await browser.newContext({ deviceScaleFactor: 1, locale: 'ja-JP', ...opts })
     await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base })
     await ctx.route('**/*', (route) => {
       const url = route.request().url()
@@ -593,6 +594,60 @@ async function main() {
       await m.getByRole('navigation', { name: '画面' }).getByRole('button', { name: 'AI Court' }).tap()
       await m.locator('.panel h2').filter({ hasText: /AI Court/ }).waitFor()
       await m.getByTestId('review-compare').getByTestId('verdict-badge').getByText('的中').waitFor()
+      await mctx.close()
+    })
+
+    await step('i18n: English UI from the browser locale, English prompt and errors, switch persists', async () => {
+      const ectx = await newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 } })
+      const e = await ectx.newPage()
+      e.on('pageerror', (err) => pageErrors.push(err.message))
+      await e.goto(`${base}/#/scenario`)
+      await e.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
+      assert.equal(await e.evaluate(() => document.documentElement.lang), 'en')
+      await e.getByRole('form', { name: 'New scenario' }).getByText('Entry / hypothesis price').waitFor()
+      await e.getByRole('navigation', { name: 'Screens' }).getByRole('button', { name: /AI Court/ }).click()
+      await e.goto(`${base}/#/court/${scenarioId}`)
+      await e.reload()
+      const prompt = e.getByTestId('prompt')
+      await prompt.waitFor()
+      assert.match(await prompt.inputValue(), /Role: BEAR \(argue against\)/)
+      assert.match(await prompt.inputValue(), /Answer in English/)
+      await e.getByText('1. Choose a role to generate the prompt').waitFor()
+      // CSV rejection in English
+      await e.getByRole('navigation', { name: 'Screens' }).getByRole('button', { name: /Market Lens/ }).click()
+      await e.getByTestId('csv-input').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from(badCsv) })
+      await e.getByRole('alert').getByText(/CSV line 2: invalid values/).waitFor()
+      // Switch to Japanese: UI, prompt and <html lang> follow; the choice survives a reload.
+      await e.getByRole('group', { name: 'Display language' }).getByRole('button', { name: '日本語' }).click()
+      await e.getByRole('heading', { name: /Market Lens/ }).waitFor()
+      await e.getByText('OHLC CSVを選択').waitFor()
+      assert.equal(await e.evaluate(() => document.documentElement.lang), 'ja')
+      await e.reload()
+      await e.getByText('OHLC CSVを選択').waitFor()
+      await e.getByRole('group', { name: '表示言語' }).getByRole('button', { name: 'EN' }).click()
+      await e.getByText('Choose an OHLC CSV').waitFor()
+      await e.screenshot({ path: join(outDir, '08-english-market.png'), fullPage: true })
+      await ectx.close()
+
+      // English strings are longer: re-check the five phone screens for overflow and table spill.
+      const mctx = await newContext({ locale: 'en-US', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+      const m = await mctx.newPage()
+      for (const route of ['market', 'scenario', 'court', 'journal', 'insights']) {
+        await m.goto(`${base}/#/${route}/${scenarioId}`)
+        await m.reload()
+        await m.getByTestId('api-status').getByText('LOCAL D1 READY').waitFor()
+        await m.locator('.panel h2').first().waitFor()
+        await m.waitForTimeout(200)
+        const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+        assert.ok(overflow <= 0, `en ${route}: horizontal overflow ${overflow}px`)
+        const spill = await m.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.table-wrap')].map((w) => {
+          if (getComputedStyle(w).overflowX !== 'visible') return 0
+          const table = w.querySelector('table')
+          return table ? Math.round(table.getBoundingClientRect().right - w.getBoundingClientRect().right) : 0
+        })))
+        assert.ok(spill <= 1, `en ${route}: a table extends ${spill}px past its container`)
+      }
+      await m.screenshot({ path: join(outDir, 'mobile-07-english-insights.png'), fullPage: true })
       await mctx.close()
     })
 
