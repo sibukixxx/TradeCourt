@@ -25,6 +25,7 @@
 - [x] Rule-based level drafts from imported candles (swing / ATR stop, R target) and one-tap paper outcomes.
 - [x] Entry default from the latest imported CSV close; optional user-pressed ECB daily reference quote (QUOTE_PROVIDER, can be off).
 - [x] English / Japanese UI, prompts and drafts; MIT license and English documentation (README.ja.md for Japanese).
+- [x] `make seed` / `make reseed`: deterministic SYNTHETIC dev data anchored to the recent USD/JPY level.
 - [ ] Strategy tags on scenarios for per-setup analysis.
 - [ ] More UI languages (see README → Languages).
 

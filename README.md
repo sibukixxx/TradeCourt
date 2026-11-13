@@ -26,6 +26,7 @@ Requirements: Node.js 22+ (with corepack) on macOS or Linux (Windows: use WSL).
 
 ```bash
 make setup    # install locked dependencies and create the local SQLite (D1) database
+make seed     # optional: load SYNTHETIC demo data near the recent USD/JPY level (starts the app)
 make start    # start API + web in the background and wait until healthy
 make open     # open http://127.0.0.1:5173
 make stop     # stop everything
@@ -34,6 +35,19 @@ make stop     # stop everything
 - Web UI: http://127.0.0.1:5173
 - Local API: http://127.0.0.1:8787/api/health (no UI on this port)
 - Run `make` to list all targets. Without make: `corepack pnpm install --frozen-lockfile && corepack pnpm db:migrate:local && corepack pnpm dev`.
+
+## Seed data for local development
+
+`make seed` fills an **empty** local database with deterministic, clearly labelled **SYNTHETIC** data, so every screen has something to show:
+- 120 daily USD/JPY candles. The last close is anchored to the latest ECB reference rate (159.7 on 2026-11-12), and the walk is scaled to the recent real range (153.27–160.16).
+- 8 scenarios (linked and unlinked), placeholder AI reviews (marked "not an AI answer"), 5 paper outcomes (followed and broken rules), grades, and two open scenarios for trying the one-tap record.
+
+Options:
+- `make seed ANCHOR=live` anchors to today's reference quote via the running API; `ANCHOR=150.25` sets the anchor explicitly.
+- `make seed FORCE=1` adds the data even if the database already has scenarios.
+- `make reseed CONFIRM=yes` backs up, resets the database and seeds it again, for a fresh dev environment. **This deletes your local data**, so only use it on a dev database.
+
+The candles are a seeded random walk, not real prices. Everything goes through the normal API validation (`scripts/seed-local.mjs`).
 
 ## Languages
 
@@ -55,7 +69,7 @@ make stop     # stop everything
 
 | Group | Targets |
 | --- | --- |
-| Setup | `setup`, `install` (frozen lockfile), `migrate` (local only) |
+| Setup | `setup`, `install` (frozen lockfile), `migrate` (local only), `seed`, `reseed CONFIRM=yes` |
 | Run | `dev` (foreground), `start` / `stop` / `restart` / `status` / `logs` (background), `open` |
 | Quality | `test`, `typecheck`, `build`, `check`, `smoke`, `e2e` (isolated temp DB), `e2e-dev`, `verify` |
 | Local data | `db-backup`, `db-restore FILE=…`, `db-reset CONFIRM=yes` (each writes a safety backup first) |
