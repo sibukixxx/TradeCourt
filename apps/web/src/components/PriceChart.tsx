@@ -1,6 +1,7 @@
 import type { Candle } from '@tradecourt/core'
 import { CHART_H, CHART_W, linePoints, xScale, yScale } from '../market'
 import { price } from '../format'
+import { t } from '../i18n'
 
 export type ChartLevels = { entry: number; stop: number; target: number }
 
@@ -37,7 +38,7 @@ export function PriceChart({ candles, label, levels, asOfIndex, decidedIndex, ra
   )
   return (
     <div className="chart-wrap">
-      <div className="chart-axis"><span>{price(max)}</span><span>{label}{ranges ? ' ・縦線＝各足の高値〜安値' : ''}</span></div>
+      <div className="chart-axis"><span>{price(max)}</span><span>{label}{ranges ? t('chart.ranges') : ''}</span></div>
       <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} preserveAspectRatio="none" role="img" aria-label={label} data-testid={testId}>
         <line vector-effect="non-scaling-stroke" x1="0" y1={CHART_H / 2} x2={CHART_W} y2={CHART_H / 2} className="chart-grid" />
         {levels && level(levels.target, 'target')}
@@ -56,8 +57,8 @@ export function PriceChart({ candles, label, levels, asOfIndex, decidedIndex, ra
       {(levels || divider !== null) && (
         <div className="chart-legend">
           {levels && <><span className="lg target">Target {price(levels.target)}</span><span className="lg entry">Entry {price(levels.entry)}</span><span className="lg stop">Stop {price(levels.stop)}</span></>}
-          {divider !== null && <span className="lg as-of">│ 仮説時点</span>}
-          {decidedIndex !== null && decidedIndex !== undefined && <span className="lg decided">│ 判定足</span>}
+          {divider !== null && <span className="lg as-of">{t('chart.asOf')}</span>}
+          {decidedIndex !== null && decidedIndex !== undefined && <span className="lg decided">{t('chart.decided')}</span>}
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { CHART_H, CHART_W, linePoints, yScale } from '../market'
 import { signed } from '../format'
+import { t } from '../i18n'
 
 type Props = { values: number[]; label: string; testId?: string }
 
@@ -17,7 +18,7 @@ export function SeriesChart({ values, label, testId = 'series-chart' }: Props) {
         <line vector-effect="non-scaling-stroke" x1="0" x2={CHART_W} y1={y(0)} y2={y(0)} className="level entry" />
         <polyline vector-effect="non-scaling-stroke" points={linePoints(series, min, max)} fill="none" stroke="#6bceb6" stroke-width="2.5" stroke-linejoin="round" />
       </svg>
-      <div className="chart-axis"><span>{signed(min)}R</span><span>{values.length}件（記録順）</span></div>
+      <div className="chart-axis"><span>{signed(min)}R</span><span>{t('chart.records', { n: values.length })}</span></div>
     </div>
   )
 }

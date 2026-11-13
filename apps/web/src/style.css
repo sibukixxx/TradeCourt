@@ -181,7 +181,7 @@ label.check input { width: 18px; height: 18px; flex: 0 0 18px; }
 .outcome-box h4 { margin-top: 16px; }
 .outcome-box .note { background: #0e1a29; border-radius: 8px; padding: 12px; overflow-wrap: anywhere; }
 .outcome-box form { gap: 16px; }
-/* ---- Review grading (答え合わせ) ---- */
+/* ---- Review grading ---- */
 .journal-layout .grading { grid-column: 1 / -1; }
 .grading { border: 1px solid #2b4154; border-radius: 12px; padding: 20px; background: #0e1a29; }
 .grading-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
@@ -194,7 +194,7 @@ label.check input { width: 18px; height: 18px; flex: 0 0 18px; }
 .grade-card-head strong { color: #c5dfd8; font-size: 13px; }
 .grade-content summary { cursor: pointer; color: #bfd0df; font-size: 12px; line-height: 1.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; list-style: none; }
 .grade-content summary::-webkit-details-marker { display: none; }
-.grade-content summary::after { content: ' ▾ 全文'; color: #6bceb6; font-size: 10px; }
+.grade-content summary::after { content: ' ▾ ' attr(data-more); color: #6bceb6; font-size: 10px; }
 .grade-content[open] summary { white-space: normal; display: none; }
 .grade-content p { margin: 0; font-size: 12px; line-height: 1.7; color: #bfd0df; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; }
 .verdict-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
@@ -293,6 +293,8 @@ fieldset.market-link legend { color: #abbdd0; font-size: 11px; font-weight: 690;
 .outcome-box form h4 { margin: 0; color: #9fb1c1; font-weight: 600; }
 .entry-source { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11px; color: #9fb1c1; margin-top: -8px; }
 .entry-source span { overflow-wrap: anywhere; }
+.top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.lang-switch button { padding: 7px 11px; font-size: 11px; }
 @media (max-width: 1100px) { .compare-grid, .import-grid { grid-template-columns: 1fr; } .stat-grid.four { grid-template-columns: repeat(2, minmax(0,1fr)); } .workspace { padding: 30px 26px; } .sidebar { width: 225px; flex-basis: 225px; } .panel { padding: 23px; } .court-grid, .journal-layout { grid-template-columns: 1fr; } .review-panel { border-left: 0; border-top: 1px solid #263747; padding: 24px 0 0; } }
 @media (max-width: 760px) { .app-shell { display: block; } .sidebar { width: 100%; min-height: 0; padding: 13px; border-right: 0; border-bottom: 1px solid #243143; } .brand { padding: 4px 0 16px; } .brand strong { font-size: 17px; } .nav { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 3px; } .nav button { display: grid; justify-items: center; gap: 4px; padding: 9px 2px; font-size: 10px; text-align: center; } .history, .history-label, .sidebar-bottom, .nav-label { display: none; } .workspace { padding: 23px 15px; } .topbar { align-items: flex-start; } .top-status { font-size: 8px; padding: 8px; } .hero-stats { grid-template-columns: repeat(2,1fr); gap: 9px; } .hero-stats>div { padding: 12px; } .hero-stats strong { font-size: 19px; } .section-head { flex-direction: column; gap: 13px; } .form-grid, .stat-grid { grid-template-columns: 1fr; } .stat-grid.four { grid-template-columns: repeat(2, minmax(0,1fr)); } .form-grid.two { grid-template-columns: 1fr 1fr; } .court-main, .review-panel { min-width: 0; } .form-footer { flex-direction: column; align-items: stretch; } .ratio-preview span:last-child { flex-basis: 100%; } .panel { padding: 17px; } .court-grid { gap: 16px; } }
 
@@ -321,6 +323,7 @@ fieldset.market-link legend { color: #abbdd0; font-size: 11px; font-weight: 690;
   .prompt-controls select { grid-column: 1 / -1; width: 100%; font-size: 16px; }
   .compare-grid { gap: 10px; }
   .grading { padding: 14px; }
+  .top-actions { flex-direction: column; align-items: flex-end; gap: 6px; } .lang-switch { width: auto; display: inline-grid; } .lang-switch button { min-height: 36px; padding: 4px 10px; }
   .entry-source .secondary { width: 100%; min-height: 44px; }
   .quick-button { min-height: 72px; } .quick-button strong { font-size: 12px; } .quick-actions > * { flex: 1; min-height: 48px; } .r-presets .secondary { min-height: 44px; flex: 1; } .auto-draft-result .primary { width: 100%; }
   .insights-toolbar { align-items: stretch; } .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%; } .segmented button { min-height: 44px; padding: 6px 4px; }

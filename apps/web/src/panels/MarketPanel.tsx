@@ -11,6 +11,7 @@ import {
 import { api, newRequestKey } from '../api'
 import { PriceChart } from '../components/PriceChart'
 import { getError, price, signed, timestamp } from '../format'
+import { getLang, t } from '../i18n'
 
 type Timeframe = '1h' | '4h' | '1d'
 type Preview = { fileName: string; candles: Candle[] }
@@ -19,10 +20,10 @@ function Stats({ candles }: { candles: Candle[] }) {
   const s = summarizeCandles(candles)
   return (
     <div className="stat-grid four" data-testid="market-stats">
-      <div className="mini-stat"><span>CSV最終行の終値</span><strong>{price(s.lastClose)}</strong><small>{s.lastDate}</small></div>
-      <div className="mini-stat"><span>期間高値</span><strong data-testid="stat-high">{price(s.high)}</strong><small>{s.highDate}</small></div>
-      <div className="mini-stat"><span>期間安値</span><strong data-testid="stat-low">{price(s.low)}</strong><small>{s.lowDate}</small></div>
-      <div className="mini-stat"><span>騰落率（初回終値→最終終値）</span><strong data-testid="stat-change" className={s.change >= 0 ? 'positive' : 'negative'}>{signed(s.changePct, 2)}%</strong><small>{signed(s.change, 3)} / {s.count}本</small></div>
+      <div className="mini-stat"><span>{t('market.lastClose')}</span><strong>{price(s.lastClose)}</strong><small>{s.lastDate}</small></div>
+      <div className="mini-stat"><span>{t('market.high')}</span><strong data-testid="stat-high">{price(s.high)}</strong><small>{s.highDate}</small></div>
+      <div className="mini-stat"><span>{t('market.low')}</span><strong data-testid="stat-low">{price(s.low)}</strong><small>{s.lowDate}</small></div>
+      <div className="mini-stat"><span>{t('market.change')}</span><strong data-testid="stat-change" className={s.change >= 0 ? 'positive' : 'negative'}>{signed(s.changePct, 2)}%</strong><small>{signed(s.change, 3)} / {t('common.candles', { n: s.count })}</small></div>
     </div>
   )
 }
@@ -61,7 +62,7 @@ export function MarketPanel() {
     setPreview(null)
     requestKey.current = null
     if (file.size > MAX_CSV_BYTES) {
-      setError('CSVファイルは2MB以下にしてください（読み込みを中止しました）')
+      setError(t('market.tooLarge'))
       if (fileInput.current) fileInput.current.value = ''
       return
     }
@@ -75,7 +76,7 @@ export function MarketPanel() {
 
   async function save() {
     if (!preview) return
-    if (!tz) { setError('CSVの時刻のタイムゾーンを選択してください（不明なら「不明」）'); return }
+    if (!tz) { setError(t('market.tzRequired')); return }
     setBusy(true); setError('')
     requestKey.current ??= newRequestKey()
     try {
@@ -104,28 +105,28 @@ export function MarketPanel() {
         <div>
           <span className="eyebrow">01 / MARKET EVIDENCE</span>
           <h2 id="market-title">Market Lens · USD/JPY</h2>
-          <p>手元のOHLC CSVを読み込み、終値推移と期間の高値・安値・騰落率を確認します。リアルタイム配信・価格取得はありません。</p>
+          <p>{t('market.intro')}</p>
         </div>
         <span className="tag">CSV · NOT LIVE</span>
       </div>
 
       <div className="import-grid">
         <label className="dropzone">
-          <strong>OHLC CSVを選択</strong>
-          <span>ヘッダーに date,open,high,low,close（順不同・他列は無視）/ 昇順・重複なし / 最大5,000行・2MB</span>
+          <strong>{t('market.choose')}</strong>
+          <span>{t('market.format')}</span>
           <input ref={fileInput} data-testid="csv-input" type="file" accept=".csv,text/csv" onChange={(e) => void readFile(e.currentTarget.files?.[0])} />
         </label>
         <div className="import-meta">
-          <label>銘柄<input value="USD/JPY" readOnly /></label>
-          <label>時間足<select value={timeframe} onChange={(e) => setTimeframe(e.currentTarget.value as Timeframe)}>
-            <option value="1h">1時間</option><option value="4h">4時間</option><option value="1d">日足</option>
+          <label>{t('market.symbol')}<input value="USD/JPY" readOnly /></label>
+          <label>{t('common.timeframe')}<select value={timeframe} onChange={(e) => setTimeframe(e.currentTarget.value as Timeframe)}>
+            <option value="1h">{t('common.tf.1h')}</option><option value="4h">{t('common.tf.4h')}</option><option value="1d">{t('common.tf.1d')}</option>
           </select></label>
-          <label>CSV時刻のタイムゾーン（必須）<select data-testid="tz-select" value={tz} onChange={(e) => setTz(e.currentTarget.value)}>
-            <option value="">選択してください</option>
-            {commonTzOffsets.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            <option value="unknown">不明（UTCとして扱い、未検証と表示）</option>
+          <label>{t('market.tzLabel')}<select data-testid="tz-select" value={tz} onChange={(e) => setTz(e.currentTarget.value)}>
+            <option value="">{t('market.tzPlaceholder')}</option>
+            {commonTzOffsets.map((o) => <option key={o.value} value={o.value}>{o.label[getLang()]}</option>)}
+            <option value="unknown">{t('market.tzUnknown')}</option>
           </select></label>
-          <label>出典メモ（任意）<input maxLength={500} placeholder="例: 証券会社エクスポート / 合成データ" value={sourceNote} onInput={(e) => setSourceNote(e.currentTarget.value)} /></label>
+          <label>{t('market.sourceNote')}<input maxLength={500} placeholder={t('market.sourceNotePh')} value={sourceNote} onInput={(e) => setSourceNote(e.currentTarget.value)} /></label>
         </div>
       </div>
       {error && <p className="inline-error" role="alert">{error}</p>}
@@ -133,41 +134,41 @@ export function MarketPanel() {
       {preview && (
         <div className="market-data preview" data-testid="csv-preview">
           <div className="preview-head">
-            <div><span className="eyebrow">PREVIEW · 未保存</span><h3>{preview.fileName}（{preview.candles.length}本）</h3></div>
-            <button className="primary" type="button" disabled={busy} onClick={() => void save()}>{busy ? '保存中…' : 'ローカルD1に保存'}</button>
+            <div><span className="eyebrow">{t('market.preview')}</span><h3>{t('market.previewTitle', { name: preview.fileName, n: preview.candles.length })}</h3></div>
+            <button className="primary" type="button" disabled={busy} onClick={() => void save()}>{busy ? t('common.saving') : t('market.save')}</button>
           </div>
           <Stats candles={preview.candles} />
-          <PriceChart candles={preview.candles} label="終値（CSV）" />
+          <PriceChart candles={preview.candles} label={t('market.closeLabel')} />
         </div>
       )}
 
-      {loading ? <div className="empty short" aria-busy="true">保存済みデータを読み込み中…</div>
+      {loading ? <div className="empty short" aria-busy="true">{t('market.loadingSaved')}</div>
         : active && !preview ? (
           <div className="market-data" data-testid="active-dataset">
             <Stats candles={active.candles} />
-            <PriceChart candles={active.candles} label="終値（CSV）" />
+            <PriceChart candles={active.candles} label={t('market.closeLabel')} />
             <dl className="provenance">
-              <div><dt>出典</dt><dd data-testid="dataset-source">手動インポート「{active.sourceName}」{active.sourceNote && ` — ${active.sourceNote}`}</dd></div>
-              <div><dt>期間</dt><dd>{active.firstDate} → {active.lastDate}（{active.timeframe} / {active.candleCount}本）</dd></div>
-              <div><dt>時刻</dt><dd data-testid="dataset-tz">{active.tzOffset ? `UTC${active.tzOffset}（取込時に指定・各足の始値時刻）` : '未指定（UTCとして計算・未検証）'}</dd></div>
-              <div><dt>取込日時</dt><dd>{timestamp(active.importedAt)}</dd></div>
+              <div><dt>{t('market.source')}</dt><dd data-testid="dataset-source">{t('market.sourceValue', { name: active.sourceName })}{active.sourceNote && ` — ${active.sourceNote}`}</dd></div>
+              <div><dt>{t('market.period')}</dt><dd>{t('market.periodValue', { from: active.firstDate, to: active.lastDate, tf: active.timeframe, n: active.candleCount })}</dd></div>
+              <div><dt>{t('market.time')}</dt><dd data-testid="dataset-tz">{active.tzOffset ? t('market.tzSet', { tz: active.tzOffset }) : t('market.tzUnset')}</dd></div>
+              <div><dt>{t('market.importedAt')}</dt><dd>{timestamp(active.importedAt)}</dd></div>
             </dl>
-            <p className="muted small">価格の真偽・時刻・欠損は検証していません。これは現在値ではなく、ユーザーが用意したCSVの内容です。</p>
+            <p className="muted small">{t('market.unverified')}</p>
           </div>
         ) : !preview && (
-          <div className="empty short">価格の推移は、CSVを読み込むまで表示されません。値動きを捏造しないため、デモチャートはありません。</div>
+          <div className="empty short">{t('market.empty')}</div>
         )}
 
       {datasets.length > 1 && (
         <div className="dataset-list">
-          <h3>取込履歴</h3>
+          <h3>{t('market.history')}</h3>
           <div className="table-wrap"><table className="responsive" data-testid="dataset-table">
-            <thead><tr><th>出典</th><th>時間足</th><th>期間</th><th>TZ</th><th>本数</th><th>取込</th></tr></thead>
+            <thead><tr><th>{t('market.source')}</th><th>{t('common.timeframe')}</th><th>{t('market.period')}</th><th>TZ</th><th>{t('market.col.count')}</th><th>{t('market.col.imported')}</th></tr></thead>
             <tbody>{datasets.map((d) => (
               <tr key={d.id} className={active?.id === d.id ? 'selected' : ''} onClick={() => void open(d.id)}>
-                <td data-label="出典"><button className="link-button" type="button">{d.sourceName}</button></td><td data-label="時間足">{d.timeframe}</td>
-                <td data-label="期間">{d.firstDate} → {d.lastDate}</td><td data-label="TZ">{d.tzOffset ? `UTC${d.tzOffset}` : '未指定'}</td>
-                <td data-label="本数">{d.candleCount}</td><td data-label="取込">{timestamp(d.importedAt)}</td>
+                <td data-label={t('market.source')}><button className="link-button" type="button">{d.sourceName}</button></td><td data-label={t('common.timeframe')}>{d.timeframe}</td>
+                <td data-label={t('market.period')}>{d.firstDate} → {d.lastDate}</td><td data-label="TZ">{d.tzOffset ? `UTC${d.tzOffset}` : t('market.tzNone')}</td>
+                <td data-label={t('market.col.count')}>{d.candleCount}</td><td data-label={t('market.col.imported')}>{timestamp(d.importedAt)}</td>
               </tr>
             ))}</tbody>
           </table></div>

@@ -7,6 +7,7 @@ import { ScenarioPanel } from './panels/ScenarioPanel'
 import { CourtPanel } from './panels/CourtPanel'
 import { JournalPanel } from './panels/JournalPanel'
 import { InsightsPanel } from './panels/InsightsPanel'
+import { setLang, t, useLang } from './i18n'
 
 type Page = 'market' | 'scenario' | 'court' | 'journal' | 'insights'
 const pages: { id: Page; label: string }[] = [
@@ -29,6 +30,8 @@ function writeHash(page: Page, id: string | null) {
 }
 
 export default function App() {
+  // Re-render the whole tree when the language changes (children re-render with the parent).
+  const lang = useLang()
   const initial = readHash()
   const [page, setPage] = useState<Page>(initial.page)
   const [selectedId, setSelectedId] = useState<string | null>(initial.id)
@@ -70,7 +73,7 @@ export default function App() {
     ;(async () => {
       try {
         const health = await api.health().catch((e: unknown) => {
-          throw new Error(getError(e) + '。未初期化なら pnpm db:migrate:local を実行してください。')
+          throw new Error(getError(e) + t('common.setupHint'))
         })
         if (!mounted) return
         setReady(health.status === 'ok')
@@ -78,7 +81,7 @@ export default function App() {
         const list = await refreshLists()
         if (!mounted) return
         const id = initial.id && list.some((s) => s.id === initial.id) ? initial.id : list[0]?.id ?? null
-        if (initial.id && id !== initial.id) showError('URLのシナリオが見つかりません。最新のシナリオを表示します。')
+        if (initial.id && id !== initial.id) showError(t('app.scenarioNotFound'))
         setSelectedId(id)
         if (id) await loadDetail(id)
       } catch (e) {
@@ -125,7 +128,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">TC</span><div><strong>TradeCourt</strong><span>DECISION REVIEW · LOCAL</span></div></div>
         <div className="nav-label">WORKSPACE</div>
-        <nav className="nav" aria-label="画面">
+        <nav className="nav" aria-label={t('app.navAria')}>
           {pages.map((p, i) => (
             <button key={p.id} type="button" aria-current={page === p.id ? 'page' : undefined} className={page === p.id ? 'active' : ''} onClick={() => { setPage(p.id); setError('') }}>
               <span>0{i + 1}</span> {p.label}
@@ -134,7 +137,7 @@ export default function App() {
         </nav>
         <div className="nav-label history-label">SCENARIO HISTORY</div>
         <div className="history">
-          {loading ? <p className="muted small">読み込み中…</p> : scenarios.length === 0 && <p className="muted small">まだシナリオがありません</p>}
+          {loading ? <p className="muted small">{t('common.loading')}</p> : scenarios.length === 0 && <p className="muted small">{t('app.noScenarios')}</p>}
           {scenarios.map((s) => (
             <button key={s.id} type="button" className={'history-item ' + (selectedId === s.id ? 'selected' : '')} onClick={() => void openScenario(s.id, page === 'journal' ? 'journal' : 'court')}>
               <span className="history-top"><strong>{s.symbol} / {s.timeframe}</strong><span className={'side ' + (s.side === 'LONG' ? 'long' : 'short-side')}>{s.side}</span></span>
@@ -148,7 +151,13 @@ export default function App() {
       <main className="workspace">
         <header className="topbar">
           <div><span className="eyebrow">TRADE DECISION WORKSPACE</span><h1>Assess. Challenge. Learn.</h1></div>
+          <div className="top-actions">
+          <div className="lang-switch segmented" role="group" aria-label={t('app.langAria')}>
+            <button type="button" lang="en" aria-pressed={lang === 'en'} className={lang === 'en' ? 'selected' : ''} onClick={() => setLang('en')}>EN</button>
+            <button type="button" lang="ja" aria-pressed={lang === 'ja'} className={lang === 'ja' ? 'selected' : ''} onClick={() => setLang('ja')}>日本語</button>
+          </div>
           <div className="top-status" data-testid="api-status"><span className={'status-dot ' + (ready ? 'on' : '')} />{ready === null ? 'CONNECTING…' : ready ? 'LOCAL D1 READY' : 'CHECK API SETUP'}</div>
+          </div>
         </header>
 
         <div className="hero-stats">
@@ -158,12 +167,12 @@ export default function App() {
           <div><span>Execution</span><strong className="negative">DISABLED</strong></div>
         </div>
 
-        {error && <div role="alert" className="alert error"><strong>確認が必要です</strong><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="閉じる">×</button></div>}
-        {notice && <div role="status" className="alert success"><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label="閉じる">×</button></div>}
+        {error && <div role="alert" className="alert error"><strong>{t('common.attention')}</strong><span>{error}</span><button type="button" onClick={() => setError('')} aria-label={t('common.close')}>×</button></div>}
+        {notice && <div role="status" className="alert success"><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label={t('common.close')}>×</button></div>}
 
         {(page === 'court' || page === 'journal') && scenarios.length > 0 && (
           <label className="scenario-picker mobile-only">
-            対象シナリオ
+            {t('app.pickScenario')}
             <select data-testid="mobile-scenario-picker" value={selectedId ?? ''} onChange={(e) => void openScenario(e.currentTarget.value, page)}>
               {scenarios.map((s) => (
                 <option key={s.id} value={s.id}>{s.side} {s.timeframe} · {price(s.entry)}→{price(s.target)} · {timestamp(s.createdAt)}</option>
@@ -184,7 +193,7 @@ export default function App() {
             onCreated={(scenario) => {
               setScenarios((items) => [scenario, ...items.filter((s) => s.id !== scenario.id)])
               void openScenario(scenario.id).then(() => refreshLists())
-              showNotice('シナリオを保存しました。AI Courtで反証を依頼できます。')
+              showNotice(t('app.scenarioSaved'))
             }}
           />
         )}
@@ -206,7 +215,7 @@ export default function App() {
           />
         )}
 
-        <footer className="footer">TRADECOURT · LOCAL-FIRST MVP <span>相場データ・AI回答・仮想取引は実績や投資助言ではありません。自動発注・ブローカー連携はありません。</span></footer>
+        <footer className="footer">TRADECOURT · LOCAL-FIRST MVP <span>{t('app.footer')}</span></footer>
       </main>
     </div>
   )
