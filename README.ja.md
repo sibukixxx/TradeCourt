@@ -26,6 +26,7 @@
 
 ```bash
 make setup    # 依存関係のインストールとローカル DB（SQLite / D1）の作成
+make seed     # 任意: 直近の USD/JPY 水準に合わせた合成デモデータを投入（アプリも起動）
 make start    # API と画面をバックグラウンドで起動
 make open     # http://127.0.0.1:5173 を開く
 make stop     # 停止
@@ -34,6 +35,19 @@ make stop     # 停止
 - 画面: http://127.0.0.1:5173
 - ローカル API: http://127.0.0.1:8787/api/health（このポートには画面はありません）
 - `make` だけ実行するとコマンド一覧を表示します。
+
+## 開発用のシードデータ
+
+`make seed` は、**空の** ローカル DB に **合成（SYNTHETIC）** と明記したデモデータを入れます。毎回同じ内容になり、すべての画面にデータが表示されます。
+- USD/JPY 日足 120 本。最終終値は直近の ECB 参照レート（159.7、2026-11-12）に合わせ、値動きの幅は直近の実際の範囲（153.27〜160.16）に収めています。
+- シナリオ 8 件、AI 回答の例（「AI の回答ではない」と明記）、仮想結果 5 件、採点、ワンタップ記録を試すための未決済シナリオ 2 件を含みます。
+
+オプション:
+- `make seed ANCHOR=live`: 起動中のアプリ経由で、その時点の参照レートを基準にします。
+- `make seed FORCE=1`: DB にデータがあっても追加します。
+- `make reseed CONFIRM=yes`: バックアップを取ってから DB を初期化し、シードを入れ直します。**ローカルのデータが消える** ため、開発用の DB でのみ使ってください。
+
+足のデータは乱数で作った合成データで、実際の価格ではありません。
 
 ## 言語
 
@@ -55,7 +69,7 @@ make stop     # 停止
 
 | 分類 | コマンド |
 | --- | --- |
-| 準備 | `setup`、`install`、`migrate` |
+| 準備 | `setup`、`install`、`migrate`、`seed`、`reseed CONFIRM=yes` |
 | 起動 | `dev`（前面）、`start` / `stop` / `restart` / `status` / `logs`（バックグラウンド）、`open` |
 | 品質確認 | `test`、`typecheck`、`build`、`check`、`smoke`、`e2e`、`e2e-dev`、`verify` |
 | ローカルデータ | `db-backup`、`db-restore FILE=…`、`db-reset CONFIRM=yes`（いずれも事前に自動バックアップ） |

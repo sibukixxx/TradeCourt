@@ -5,7 +5,7 @@ PNPM ?= corepack pnpm
 DEVCTL := node scripts/devctl.mjs
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install migrate dev api web start stop restart status logs logs-follow open \
+.PHONY: help setup install migrate seed reseed dev api web start stop restart status logs logs-follow open \
         test typecheck build check smoke e2e e2e-dev verify db-backup db-restore db-reset clean
 
 help: ## Show this help
@@ -21,6 +21,16 @@ install: ## Install dependencies exactly as locked (pnpm-lock.yaml)
 
 migrate: ## Apply D1 (SQLite) migrations to the LOCAL database
 	$(PNPM) db:migrate:local
+
+seed: ## Load SYNTHETIC demo data near the recent USD/JPY level (ANCHOR=live|<price>, FORCE=1); starts the app if needed
+	@$(DEVCTL) running >/dev/null 2>&1 || $(MAKE) --no-print-directory start
+	@ANCHOR="$(ANCHOR)" FORCE="$(FORCE)" node scripts/seed-local.mjs
+
+reseed: ## Fresh dev database: backup, reset, migrate and seed (needs CONFIRM=yes)
+	@if [ "$(CONFIRM)" != "yes" ]; then echo "This deletes all local TradeCourt data (a backup is taken first) and loads SYNTHETIC seed data. Run: make reseed CONFIRM=yes"; exit 1; fi
+	@$(DEVCTL) stop
+	@$(DEVCTL) db-reset
+	@$(MAKE) --no-print-directory seed
 
 ##@ Run
 dev: migrate ## Apply pending local migrations, then run API + Web in the foreground (Ctrl+C to stop)

@@ -83,6 +83,14 @@ Use `pnpm db:migrate:local`; Wrangler stores local D1 state under `apps/api/.wra
 - Core takes `Lang` where it generates text: `buildReviewPrompt(…, lang)` (prompt asks the AI to answer in that language), `draftLevels(…, lang)`. CSV parse errors are `CsvParseError` with a stable `code` and line, translated in the UI. API error messages stay English.
 - Dates/times use the selected locale (`ja-JP` / `en-US`). Stored data is language-neutral.
 
+## Seed data (`scripts/seed-data.mjs`, `scripts/seed-local.mjs`)
+- Pure, deterministic generator: seeded PRNG (mulberry32). 120 weekday candles before "today" (UTC). Built backwards from the anchor with ~0.45% daily log-returns, then shrunk (never stretched) so closes stay within the recent ECB range relative to the anchor.
+- Levels: stop beyond the 20-candle swing, distance clamped to 0.5–2.5 yen; target 1.5/2/3R.
+- Outcomes follow fixed rules after asking the API for the path check: follow the path (ambiguous → stop), early exit, beyond the stop, fixed R, or left open.
+- Loaded only through the API (validation, idempotency keys per day/anchor). It refuses a non-empty database unless `FORCE=1`, and refuses non-loopback targets.
+- All names and texts are labelled SYNTHETIC; review texts say "not an AI answer".
+- Tested in `apps/api/test/seed.test.mjs` against the real routes and migrations.
+
 ## Testing
 - `pnpm test`: core unit tests + API route tests on `apps/api/test/d1-sqlite.ts`, a tiny D1 shim over Node's built-in `node:sqlite` that applies the real migration files.
 - `pnpm smoke:local`: loopback-only API smoke against the running Worker.
