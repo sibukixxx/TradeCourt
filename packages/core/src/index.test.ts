@@ -57,19 +57,34 @@ describe('pure trade math and prompt boundaries', () => {
   })
 
   it('generates distinct roles without pretending to know live prices', () => {
-    const bull = buildReviewPrompt(long, 'BULL')
-    const bear = buildReviewPrompt(long, 'BEAR')
+    const bull = buildReviewPrompt(long, 'BULL', 'ja')
+    const bear = buildReviewPrompt(long, 'BEAR', 'ja')
     expect(bull).toContain('賛成側')
     expect(bear).toContain('反対側')
     expect(bull).not.toEqual(bear)
     expect(bull).toContain('リアルタイム価格')
+    expect(bull).toContain('日本語で回答')
   })
 
   it('mentions the as-of candle only when the scenario is linked to imported data', () => {
-    expect(buildReviewPrompt(long, 'BEAR')).not.toContain('仮説時点')
-    const linked = buildReviewPrompt({ ...long, marketRef: { asOfDate: '2026-01-06' } }, 'BEAR')
+    expect(buildReviewPrompt(long, 'BEAR', 'ja')).not.toContain('仮説時点')
+    const linked = buildReviewPrompt({ ...long, marketRef: { asOfDate: '2026-01-06' } }, 'BEAR', 'ja')
     expect(linked).toContain('仮説時点: 2026-01-06')
     expect(linked).toContain('最新相場ではありません')
+    const en = buildReviewPrompt({ ...long, marketRef: { asOfDate: '2026-01-06' } }, 'BEAR', 'en')
+    expect(en).toContain('As of: close of the 2026-01-06 candle')
+    expect(en).toContain('not current market data')
+  })
+
+  it('defaults to English with the same safety constraints', () => {
+    const bull = buildReviewPrompt(long, 'BULL')
+    const bear = buildReviewPrompt(long, 'BEAR')
+    expect(bull).toContain('Role: BULL (argue for)')
+    expect(bear).toContain('Role: BEAR (argue against)')
+    expect(bull).toContain('Risk/reward: 1:2')
+    expect(bull).toContain('Answer in English')
+    expect(bull).toContain('do not claim that you have')
+    expect(bull).toContain('Do not invent reasons, prices')
   })
 })
 

@@ -3,6 +3,7 @@
 // selling. It only applies fixed, documented rules to past candles up to the as-of candle
 // (no look-ahead) and labels the result as an editable draft.
 import type { Candle } from './market'
+import type { Lang } from './lang'
 
 export type LevelMethod = 'SWING' | 'ATR'
 
@@ -37,6 +38,37 @@ export type LevelDraft = {
   facts: LevelFacts
   thesisDraft: string
   invalidationDraft: string
+}
+
+/** Prefixes that mark an untouched auto draft (any language). */
+export const AUTO_DRAFT_PREFIXES = ['【自動下書き', '[AUTO DRAFT'] as const
+
+function draftTexts(f: LevelFacts, side: 'LONG' | 'SHORT', method: LevelMethod, stop: number, rewardR: number, timeframe: string, lang: Lang) {
+  const long = side === 'LONG'
+  if (lang === 'ja') {
+    const tf = timeframe ? `${timeframe}足 ` : ''
+    const trend = f.sma20 === null ? '' : `終値は直近20本の平均 ${f.sma20} より${f.close >= f.sma20 ? '上' : '下'}。`
+    const stopRule = method === 'ATR'
+      ? `損切りはATR(${ATR_PERIOD})=${f.atr} の${ATR_STOP_MULTIPLE}倍`
+      : `損切りは直近${f.lookback}本の${long ? '安値' : '高値'} ${long ? f.swingLow : f.swingHigh} の少し${long ? '下' : '上'}`
+    return {
+      thesisDraft: `【自動下書き・要編集】${tf}${f.asOfDate} の終値 ${f.close}（取込CSV）。直近${f.lookback}本の高値 ${f.swingHigh} / 安値 ${f.swingLow}` +
+        `${f.atr !== null ? `、ATR(${ATR_PERIOD}) ${f.atr}` : ''}。${trend}${side}を選択。${stopRule}、利確は${rewardR}R。` +
+        `ここに自分の根拠（なぜこの方向か）を書き足してください。`,
+      invalidationDraft: long ? `${stop} を下回ったら仮説は無効` : `${stop} を上回ったら仮説は無効`,
+    }
+  }
+  const tf = timeframe ? `${timeframe} ` : ''
+  const trend = f.sma20 === null ? '' : ` Close is ${f.close >= f.sma20 ? 'above' : 'below'} the 20-candle average ${f.sma20}.`
+  const stopRule = method === 'ATR'
+    ? `stop at ${ATR_STOP_MULTIPLE}x ATR(${ATR_PERIOD})=${f.atr}`
+    : `stop just ${long ? 'below' : 'above'} the ${f.lookback}-candle ${long ? 'low' : 'high'} ${long ? f.swingLow : f.swingHigh}`
+  return {
+    thesisDraft: `[AUTO DRAFT – edit me] ${tf}close ${f.close} at ${f.asOfDate} (imported CSV). ${f.lookback}-candle high ${f.swingHigh} / low ${f.swingLow}` +
+      `${f.atr !== null ? `, ATR(${ATR_PERIOD}) ${f.atr}` : ''}.${trend} ${side} chosen; ${stopRule}; target ${rewardR}R.` +
+      ` Add your own reason for this direction here.`,
+    invalidationDraft: long ? `Invalid if price falls below ${stop}` : `Invalid if price rises above ${stop}`,
+  }
 }
 
 const r3 = (n: number) => Number(n.toFixed(3))
@@ -87,6 +119,7 @@ export function draftLevels(
   method: LevelMethod,
   rewardR = 2,
   timeframe = '',
+  lang: Lang = 'en',
 ): LevelDraft | null {
   const f = computeLevelFacts(candles, asOfIndex)
   if (!f) return null
@@ -108,14 +141,6 @@ export function draftLevels(
     ? { price: swingLevel, rewardR: r2(Math.abs(swingLevel - entry) / risk) }
     : null
 
-  const tf = timeframe ? `${timeframe}足 ` : ''
-  const trend = f.sma20 === null ? '' : `終値は直近20本の平均 ${f.sma20} より${f.close >= f.sma20 ? '上' : '下'}。`
-  const stopRule = method === 'ATR'
-    ? `損切りはATR(${ATR_PERIOD})=${f.atr} の${ATR_STOP_MULTIPLE}倍`
-    : `損切りは直近${f.lookback}本の${long ? '安値' : '高値'} ${long ? f.swingLow : f.swingHigh} の少し${long ? '下' : '上'}`
-  const thesisDraft = `【自動下書き・要編集】${tf}${f.asOfDate} の終値 ${f.close}（取込CSV）。直近${f.lookback}本の高値 ${f.swingHigh} / 安値 ${f.swingLow}` +
-    `${f.atr !== null ? `、ATR(${ATR_PERIOD}) ${f.atr}` : ''}。${trend}${side}を選択。${stopRule}、利確は${rewardR}R。` +
-    `ここに自分の根拠（なぜこの方向か）を書き足してください。`
-  const invalidationDraft = long ? `${stop} を下回ったら仮説は無効` : `${stop} を上回ったら仮説は無効`
+  const { thesisDraft, invalidationDraft } = draftTexts(f, side, method, stop, rewardR, timeframe, lang)
   return { method, side, entry, stop, target, rewardR, swingTarget, facts: f, thesisDraft, invalidationDraft }
 }

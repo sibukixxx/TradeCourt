@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { marketDatasetInputSchema, parseOhlcCsv, summarizeCandles } from './market'
+import { CsvParseError, marketDatasetInputSchema, parseOhlcCsv, summarizeCandles } from './market'
 
 // All fixtures below are SYNTHETIC values for tests only; they are not real USD/JPY quotes.
 const csv = [
@@ -17,17 +17,20 @@ describe('OHLC CSV import', () => {
   })
 
   it.each([
-    ['missing column', 'date,open,high,close\n2026-01-01,1,2,1.5\n2026-01-02,1,2,1.5', /date,open,high,low,close/],
-    ['header only', 'date,open,high,low,close\n', /少なくとも2行/],
-    ['high below close', 'date,open,high,low,close\n2026-01-01,150,150.1,149,151\n2026-01-02,150,151,149,150', /2行目/],
-    ['negative / text number', 'date,open,high,low,close\n2026-01-01,150,151,149,150\n2026-01-02,-1,151,149,150', /3行目/],
-    ['locale number', 'date,open,high,low,close\n2026-01-01,150,151,149,150\n2026-01-02,"1,50",151,149,150', /3行目/],
-    ['impossible date', 'date,open,high,low,close\n2026-02-31,150,151,149,150\n2026-03-01,150,151,149,150', /2行目/],
-    ['unsorted', 'date,open,high,low,close\n2026-01-02,150,151,149,150\n2026-01-01,150,151,149,150', /昇順/],
-    ['duplicate date', 'date,open,high,low,close\n2026-01-02,150,151,149,150\n2026-01-02,150,151,149,150', /昇順/],
-    ['ragged row', 'date,open,high,low,close\n2026-01-01,150,151,149,150\n2026-01-02,150,151,149', /列数/],
-  ])('rejects %s', (_label, source, message) => {
-    expect(() => parseOhlcCsv(source)).toThrow(message)
+    ['missing column', 'date,open,high,close\n2026-01-01,1,2,1.5\n2026-01-02,1,2,1.5', 'MISSING_COLUMNS', 1],
+    ['header only', 'date,open,high,low,close\n', 'TOO_FEW_ROWS', null],
+    ['high below close', 'date,open,high,low,close\n2026-01-01,150,150.1,149,151\n2026-01-02,150,151,149,150', 'INVALID_ROW', 2],
+    ['negative / text number', 'date,open,high,low,close\n2026-01-01,150,151,149,150\n2026-01-02,-1,151,149,150', 'INVALID_ROW', 3],
+    ['locale number', 'date,open,high,low,close\n2026-01-01,150,151,149,150\n2026-01-02,"1,50",151,149,150', 'COLUMN_COUNT', 3],
+    ['impossible date', 'date,open,high,low,close\n2026-02-31,150,151,149,150\n2026-03-01,150,151,149,150', 'INVALID_ROW', 2],
+    ['unsorted', 'date,open,high,low,close\n2026-01-02,150,151,149,150\n2026-01-01,150,151,149,150', 'NOT_ASCENDING', 3],
+    ['duplicate date', 'date,open,high,low,close\n2026-01-02,150,151,149,150\n2026-01-02,150,151,149,150', 'NOT_ASCENDING', 3],
+    ['ragged row', 'date,open,high,low,close\n2026-01-01,150,151,149,150\n2026-01-02,150,151,149', 'COLUMN_COUNT', 3],
+  ])('rejects %s with a stable code and line', (_label, source, code, line) => {
+    let error: unknown
+    try { parseOhlcCsv(source) } catch (e) { error = e }
+    expect(error).toBeInstanceOf(CsvParseError)
+    expect(error).toMatchObject({ code, line })
   })
 
   it('rejects more than 5,000 candles', () => {

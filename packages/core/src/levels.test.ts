@@ -32,17 +32,22 @@ describe('targetForR', () => {
 
 describe('draftLevels (direction is always the user\'s choice)', () => {
   it('SWING LONG: stop just below the recent low, 2R target, swing high as alternative', () => {
-    const d = draftLevels(four, 3, 'LONG', 'SWING', 2, '1d')!
+    const d = draftLevels(four, 3, 'LONG', 'SWING', 2, '1d', 'ja')!
     expect(d).toMatchObject({ entry: 150.4, stop: 149.48, target: 152.24, rewardR: 2, swingTarget: { price: 151.2, rewardR: 0.87 } })
     expect(d.thesisDraft).toContain('【自動下書き・要編集】1d足 2026-01-08 の終値 150.4')
     expect(d.thesisDraft).toContain('LONGを選択')
     expect(d.invalidationDraft).toBe('149.48 を下回ったら仮説は無効')
+    const en = draftLevels(four, 3, 'LONG', 'SWING', 2, '1d')!
+    expect(en.thesisDraft).toMatch(/^\[AUTO DRAFT – edit me\] 1d close 150\.4 at 2026-01-08/)
+    expect(en.thesisDraft).toContain('LONG chosen; stop just below the 4-candle low 149.5; target 2R')
+    expect(en.invalidationDraft).toBe('Invalid if price falls below 149.48')
   })
 
   it('SWING SHORT mirrors around the recent high', () => {
-    const d = draftLevels(four, 3, 'SHORT', 'SWING', 2)!
+    const d = draftLevels(four, 3, 'SHORT', 'SWING', 2, '', 'ja')!
     expect(d).toMatchObject({ entry: 150.4, stop: 151.22, target: 148.76, swingTarget: { price: 149.5, rewardR: 1.1 } })
     expect(d.invalidationDraft).toBe('151.22 を上回ったら仮説は無効')
+    expect(draftLevels(four, 3, 'SHORT', 'SWING', 2)!.invalidationDraft).toBe('Invalid if price rises above 151.22')
   })
 
   it('ATR method uses 1.5 x ATR and needs enough candles', () => {
