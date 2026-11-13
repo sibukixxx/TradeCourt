@@ -18,13 +18,15 @@
 - [ ] Candle snapshot hashing (look-ahead is already prevented by the as-of close rule).
 - [ ] DST-aware timezones (IANA zones) for CSV imports.
 - [x] Plan vs user-entered paper outcome comparison and basic journal summary (wins/losses, total/avg R, rule adherence).
-- [x] Review quality metrics: post-hoc grading of each AI review (的中/外れ/判定不能) and per AI × BULL/BEAR hit-rate scorecard.
+- [x] Review quality metrics: post-hoc grading of each AI review (hit / miss / unclear) and per AI × BULL/BEAR hit-rate scorecard.
 - [x] Phone UI: bottom tab bar, scenario picker, card tables, touch targets.
 - [x] Data export (JSON/CSV) and SQL backup/restore (`make db-backup` / `db-restore`).
 - [x] Decision-habit analysis (Insights): rule adherence, exit reasons, plan vs CSV path gaps, cumulative paper R.
 - [x] Rule-based level drafts from imported candles (swing / ATR stop, R target) and one-tap paper outcomes.
 - [x] Entry default from the latest imported CSV close; optional user-pressed ECB daily reference quote (QUOTE_PROVIDER, can be off).
+- [x] English / Japanese UI, prompts and drafts; MIT license and English documentation (README.ja.md for Japanese).
 - [ ] Strategy tags on scenarios for per-setup analysis.
+- [ ] More UI languages (see README → Languages).
 
 ## P2 — use outside localhost
 - [ ] Security review (auth, access, per-user isolation, CORS/CSRF and data retention).

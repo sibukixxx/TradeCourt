@@ -1,5 +1,5 @@
 // Optional, user-initiated USD/JPY reference quote. Called ONLY when the user presses
-// "現在値を取得"; never on page load or in the background. Not a live/tradeable price feed.
+// "Get current price"; never on page load or in the background. Not a live/tradeable price feed.
 //
 // QUOTE_PROVIDER (wrangler vars / --var):
 //   frankfurter : European Central Bank daily reference rate via api.frankfurter.dev (no key)

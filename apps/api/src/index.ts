@@ -218,7 +218,7 @@ app.get('/api/health', async (c) => {
   })
 })
 
-// ---- Optional reference quote (only when the user presses 現在値を取得) ----------------------
+// ---- Optional reference quote (only when the user presses "Get current price") ------------
 app.get('/api/quote/usdjpy', async (c) => {
   const provider = quoteProvider(c.env.QUOTE_PROVIDER)
   if (provider === 'off') return c.json({ error: 'External quotes are disabled (QUOTE_PROVIDER=off)' }, 403)
@@ -438,7 +438,7 @@ app.get('/api/scenarios/:id/path-check', async (c) => {
   })
 })
 
-// ---- Post-hoc review grading (答え合わせ) ------------------------------------------------
+// ---- Post-hoc review grading -------------------------------------------------------------
 // Only after a paper outcome exists. Re-grading overwrites the verdict (it is the user's own
 // judgment, not a trade record); the paper outcome itself stays immutable.
 app.put('/api/scenarios/:id/reviews/:reviewId/grade', async (c) => {

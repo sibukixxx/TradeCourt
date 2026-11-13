@@ -1,98 +1,99 @@
 # TradeCourt
 
-A local-first **trade-decision review workspace**. Record a hypothetical USD/JPY scenario, compute its risk/reward, ask your existing AI subscriptions for opposing arguments via **copy + open official site**, paste their replies back, and compare with a manually recorded **paper-trade** outcome.
+**English** | [日本語](README.ja.md)
 
-トレード仮説をAIに反証させ、仮想取引の結果と比較するローカル専用アプリです。
+A local-first **trade-decision review workspace**. Write down a trade hypothesis *before* you act, have your existing AI subscriptions argue **for and against** it (via copy and paste, no API keys), record a **paper-trade** outcome, and learn from the gap between plan and result.
 
-**Not included (by design):** AI API keys, browser automation of AI sites, session cookies, broker integration, order execution, live/real-time market data (the only external request is the optional, user-pressed 現在値を取得 below), trading signals or return claims. Paper outcomes are user-entered, never broker fills.
+> **Not a signal service.** TradeCourt never tells you to buy or sell, never places orders, never connects to a broker and never pretends to have live prices. All outcomes are user-entered paper trades. Nothing here is investment advice.
 
-## Screens
+The UI is available in **English and Japanese** (auto-detected from your browser, switchable at any time).
 
-| Screen | What it does |
+## What you can do
+
+| Screen | Purpose |
 | --- | --- |
-| **01 Market Lens** | Import a local OHLC CSV (USD/JPY, `date,open,high,low,close`, ascending, ≤5,000 rows, ≤2 MB). Shows close-price chart, period high/low (with dates), change and % change, data period, source file and import time. Invalid / oversized CSV is rejected. Imported snapshots persist in local D1, flagged `verified: false`. No live prices. The timezone of the CSV timestamps is a required choice at import (fixed UTC offset such as JST +09:00, or "unknown" = treated as UTC and flagged). |
-| **02 Scenario** | LONG/SHORT, 1h/4h/1d, Entry/Stop/Target with live R:R and direction check, entry thesis and invalidation condition. Saved scenarios are immutable and listed. Optionally link the scenario to an imported CSV candle ("as-of": the hypothesis is formed at that candle's close); the form shows the as-of close, can copy it into Entry and charts the levels. The link is part of the immutable snapshot. **Auto draft:** after linking a CSV candle, pick only the direction; Entry (as-of close), Stop (just beyond the recent 20-candle low/high, or 1.5×ATR(14)) and Target (1.5/2/3R) plus thesis/invalidation drafts are filled by fixed rules on past candles — clearly labelled 【自動下書き・要編集】, never a buy/sell recommendation. **R buttons** (1/1.5/2/3R) set the target from Entry/Stop even without CSV. **Entry default:** the last close of the most recent imported CSV candle (no network, source shown). **現在値を取得:** only when pressed, the local API fetches the ECB daily USD/JPY reference rate (api.frankfurter.dev, no key, published once per business day — not real-time) and shows its date/source. Disable with `QUOTE_PROVIDER=off` (see below). |
-| **03 AI Court** | Generates BULL (賛成) / BEAR (反対) prompts from the saved scenario, one-click copy, opens the official ChatGPT / Claude / Gemini / Grok site in a new tab. You paste the answer back; provider, role, answer time and save time are stored. BULL vs BEAR side-by-side comparison and provider × role matrix. Pasted text is rendered as plain text (never HTML). |
-| **04 Journal** | Shows the scenario snapshot and its AI reviews, records one immutable paper exit (price, exit reason, rule adherence, reflection), computes the R multiple, compares plan vs. actual decision, and lists the full decision history with paper-only summary stats. **One-tap record:** 利確で終了 / 損切りで終了 / 建値で撤退 buttons (the one matching the CSV path is marked), then one confirm tap — the record is immutable, so a mis-tap can be cancelled before saving. Other prices: manual input below. |
-| **答え合わせ (in Journal)** | After the paper exit is recorded, grade each pasted AI review as 的中 / 外れ / 判定不能 with an optional note (suggestion: profit → BULL hit, loss → BEAR hit; you decide, and can re-grade). A scorecard shows hit rate per AI × BULL/BEAR (判定不能 excluded), reviews awaiting a grade, and losses where a BEAR warning was graded a hit. Grades are your own judgment against paper results, not market verification. |
-| **値動きとの照合 (in Journal)** | For linked scenarios: which level (stop or target) the user's own CSV touched first after the as-of close, the candle it happened on, R, max favourable/adverse excursion before it, gap-through-level warnings, and a chart with levels, as-of and deciding-candle markers. Pick any imported dataset with later candles (finer timeframes allowed). Compared with your paper outcome (R difference, exit-reason mismatch). Reference only: computed on demand from unverified CSV; one candle spanning both levels is reported as 判定不能; no look-ahead, spread, fees or swaps. |
-| **05 Insights** | Decision-habit analysis over your paper records (all / last 50 / 20 / 10): average & total R, win rate, max drawdown, losses beyond −1R, cumulative-R chart, results when you followed vs broke your rules, by exit reason and side, and — for scenarios linked to market data — how your exits compared with the CSV path (target reached but exited early: R left on the table; exited before the stop: R saved; exited beyond the stop). CSV / JSON export of all records (CSV is spreadsheet-safe: UTF-8 BOM, formula-injection guard). Everything is labelled paper / reference, not performance or advice. |
+| **01 Market Lens** | Import your own OHLC CSV (USD/JPY, `date,open,high,low,close`, ≤5,000 rows, ≤2 MB). See the close-price chart, period high/low and change. The CSV timezone is an explicit choice at import. Bad or oversized files are rejected. There is no live feed. |
+| **02 Scenario** | LONG/SHORT, 1h/4h/1d, Entry/Stop/Target with a live risk/reward preview, thesis and invalidation condition. A saved scenario is immutable. You can optionally link it to the imported candle you formed it at ("as of"). Pick only the direction and an **auto draft** fills Entry, Stop (beyond the recent swing or 1.5×ATR) and Target (1.5/2/3R) using fixed rules on past candles; the draft is clearly labelled and is never a recommendation. **R buttons** set the target from Entry/Stop. Entry defaults to the latest imported close. |
+| **03 AI Court** | Generates BULL (for) and BEAR (against) prompts in your UI language. Copy one, open ChatGPT / Claude / Gemini / Grok on its official site, and paste the answer back. Provider, role and time are stored, and answers are compared side by side. Pasted text is always rendered as plain text. |
+| **04 Journal** | Record one immutable paper exit, either with a **one-tap** button (target / stop / entry, plus a confirm tap) or at any other price. The R multiple is computed, and plan vs. decision is compared. **Path check:** for linked scenarios, see which level your own later CSV touched first (no look-ahead; a candle touching both levels is "ambiguous"). **Grade the AI reviews** (hit / miss / unclear) against the result. |
+| **05 Insights** | Decision-habit analysis of your paper records: average R, win rate, drawdown, rules followed vs. broken, R left on the table vs. saved compared with the CSV path, and hit rate by AI. Export everything as CSV or JSON. |
 
-**Phone UI (≤760px):** bottom tab bar (safe-area aware), scenario picker on AI Court / Journal, tables shown as stacked cards, 44px touch targets, 16px inputs (no iOS zoom on focus), sticky success/error messages.
+Works on phones as well: bottom tab bar, card tables and 44px touch targets.
 
-## Quick start (Node 22+, macOS / Linux)
+## Quick start
+
+Requirements: Node.js 22+ (with corepack) on macOS or Linux (Windows: use WSL).
 
 ```bash
-make setup    # install locked dependencies + migrate the local SQLite (D1) database
-make start    # start API + Web in the background and wait until healthy
+make setup    # install locked dependencies and create the local SQLite (D1) database
+make start    # start API + web in the background and wait until healthy
 make open     # open http://127.0.0.1:5173
 make stop     # stop everything
 ```
 
-- Web: http://127.0.0.1:5173 (Vite, proxies `/api` to the Worker)
-- API: http://127.0.0.1:8787/api/health (Wrangler local, SQLite/D1 state in `apps/api/.wrangler/`, gitignored)
-- Run `make` to list every target. Without make: `corepack pnpm install --frozen-lockfile && corepack pnpm db:migrate:local && corepack pnpm dev`.
+- Web UI: http://127.0.0.1:5173
+- Local API: http://127.0.0.1:8787/api/health (no UI on this port)
+- Run `make` to list all targets. Without make: `corepack pnpm install --frozen-lockfile && corepack pnpm db:migrate:local && corepack pnpm dev`.
+
+## Languages
+
+- English and Japanese are included. The initial language follows the browser (`ja*` → Japanese, otherwise English). The **EN / 日本語** switch in the top bar remembers your choice.
+- AI prompts and auto-draft texts are generated in the selected language.
+- **Adding a language** means:
+  1. Add `apps/web/src/i18n/<lang>.ts` typed against `ja.ts`; a missing key is a compile error.
+  2. Extend `Lang` in `packages/core/src/lang.ts`.
+  3. Add prompt and draft templates in `packages/core` (`buildReviewPrompt`, `draftLevels`).
+
+## Optional reference quote ("Get current price")
+
+- Only when you press the button, the local API fetches the **European Central Bank daily USD/JPY reference rate** from api.frankfurter.dev.
+  - It sends no key and no user data, uses a 5 s timeout and validates the response.
+  - The value is not a live or tradeable price, and the UI shows its date.
+- To disable all external requests, put `QUOTE_PROVIDER=off` in `apps/api/.dev.vars` (gitignored) and run `make restart`.
 
 ## Make targets
 
 | Group | Targets |
 | --- | --- |
-| Setup | `make setup` (= `install` + `migrate`), `make install` (`--frozen-lockfile`), `make migrate` (local only) |
-| Run (foreground) | `make dev` (API + Web, Ctrl+C to stop), `make api`, `make web` |
-| Run (background) | `make start` (waits for both health checks; refuses if ports 8787/5173 are taken or the DB is not migrated), `make stop` (stops the whole process group, no leftover workerd/vite), `make restart`, `make status`, `make logs`, `make logs-follow`, `make open` |
-| Quality | `make test`, `make typecheck`, `make build`, `make check` (all three), `make smoke` (needs `make start`), `make e2e` (isolated temp DB), `make e2e-dev` (against the running app), `make verify` (setup + check + e2e) |
-| Local database | `make db-backup` → `backups/tradecourt-backup-<time>.sql`; `make db-restore FILE=backups/<file>.sql`; `make db-reset CONFIRM=yes` (deletes all local data). Restore and reset require the server to be stopped and always write a safety backup first. |
-| Cleanup | `make clean` (build output, test artifacts, log; keeps data, backups, node_modules) |
+| Setup | `setup`, `install` (frozen lockfile), `migrate` (local only) |
+| Run | `dev` (foreground), `start` / `stop` / `restart` / `status` / `logs` (background), `open` |
+| Quality | `test`, `typecheck`, `build`, `check`, `smoke`, `e2e` (isolated temp DB), `e2e-dev`, `verify` |
+| Local data | `db-backup`, `db-restore FILE=…`, `db-reset CONFIRM=yes` (each writes a safety backup first) |
 
-Background state lives in `.run/` (PID + `dev.log`); backups in `backups/`. Both are gitignored because they can contain your personal trade journal. Background control is implemented in `scripts/devctl.mjs` (POSIX process groups; macOS / Linux).
+Background state (`.run/`) and backups (`backups/`) are gitignored because they may contain your personal trading journal.
 
-## pnpm scripts (used by the Makefile)
+## Testing
 
-| Command | Purpose |
-| --- | --- |
-| `corepack pnpm test` | Vitest: `packages/core` (schemas, R:R, R multiple, prompts, CSV parsing/stats, grading suggestion/scorecard) and `apps/api` (all routes against the real migrations on an in-memory `node:sqlite` D1 shim: validation, 400/404/409/413/415/403, idempotency, grading, journal, market). |
-| `corepack pnpm typecheck` | `tsc --noEmit` for all packages. |
-| `corepack pnpm build` | Production build of the web app. |
-| `corepack pnpm db:migrate:local` | Apply D1 migrations to the **local** database only. |
-| `corepack pnpm smoke:local` | With `pnpm dev` running: synthetic API smoke against `127.0.0.1:8787` (writes synthetic rows to your local D1). |
-| `corepack pnpm test:e2e` | Playwright/Chromium browser E2E of the full flow on an **isolated** temporary D1 (API :8798, web :5183); temp state is deleted afterwards. Set `TRADECOURT_E2E_BASE_URL=http://127.0.0.1:5173` to run against your running `pnpm dev` instead. Screenshots go to `test-results/` (gitignored). On a new machine run `corepack pnpm exec playwright install chromium` once. |
+- `make test`: Vitest unit tests (`packages/core`) and API route tests against the real migrations on an in-memory SQLite.
+- `make e2e`: Playwright browser E2E of the whole flow on an isolated temporary database, in Japanese and English and at phone size. It fails on any external network request and never opens or automates AI websites.
+- Latest results are in [docs/VERIFICATION.md](docs/VERIFICATION.md). On a new machine, run `corepack pnpm exec playwright install chromium` once before `make e2e`.
 
-The browser E2E blocks and fails on any non-loopback request. It checks external AI links' `href`/`target`/`rel` but never opens, logs into or automates an AI site.
+## Project layout
 
-## Verification results
+```text
+apps/web       Preact + Vite UI (i18n in src/i18n)
+apps/api       Hono on the Cloudflare Workers runtime, run locally by Wrangler; SQLite via local D1
+packages/core  Zod contracts, R:R / R-multiple math, path check, analysis, prompts
+scripts/       dev control, smoke test, browser E2E
+```
 
-Latest run: 2026-11-12, Linux cloud container (Node v22.23.4, pnpm 10.23.0 via corepack 0.36.0, wrangler 4.160.1, Chromium via Playwright 1.63.0). The exact Git SHA is recorded in the pull request.
-
-| Check | Result |
-| --- | --- |
-| `pnpm install --frozen-lockfile` (fresh `node_modules`) | PASS |
-| `pnpm test` — core 56 tests, api 49 tests | PASS |
-| `pnpm typecheck` / `pnpm build` | PASS |
-| `pnpm db:migrate:local` — 0003 applied on top of an already populated local DB; existing rows intact (ungraded) | PASS |
-| `pnpm dev` → `GET /api/health` on :8787 and via :5173 proxy | PASS |
-| `pnpm smoke:local` (incl. grading, root guidance, market link + path check, analysis, CSV/JSON export) | PASS |
-| `pnpm test:e2e` isolated, 17 steps (previous 12 + 答え合わせ on desktop + phone 390×844 touch flow: bottom tab bar stays pinned, scenario picker, tap grading, sticky message, card tables, no horizontal overflow; + required CSV timezone, scenario linked to an as-of candle, path check STOP first with chart markers and high-low ranges, R difference and exit-reason mismatch vs paper outcome, reload; + path-based grading suggestion, Insights aggregates, CSV/JSON download, five screens on a phone with no table spilling out of its card; + auto-drafted levels from CSV, R buttons, one-tap outcome with cancel/confirm on desktop and 390px touch) | PASS 17/17 |
-| Same E2E against running `pnpm dev` (:5173/:8787, real local D1) | PASS 17/17 |
-| Grades and all data persist after stopping and restarting `pnpm dev` | PASS |
-| Make targets: `start`/`stop`/`restart`/`status`/`logs`, port-conflict and unmigrated-DB refusal, no leftover processes after `stop` | PASS |
-| `make db-backup` → `db-reset CONFIRM=yes` (empty) → `db-restore` returns identical counts (14 scenarios / 13 reviews / 5 graded / 7 datasets) | PASS |
-| `make verify` (setup + test + typecheck + build + isolated E2E 17/17) | PASS |
-| Real 現在値を取得 in the browser: Entry set to the ECB reference rate (159.7, 2026-11-12) with date/source; the browser made 0 non-loopback requests (the local API fetched it) | PASS |
-| Health reports pending migrations (DB at 0003 → 503 with `make migrate` hint); `make start` auto-applies them | PASS |
-| Migration 0004 on an already populated local DB (17 existing scenarios intact, unlinked); market links persist across `make restart` | PASS |
-| `GET http://127.0.0.1:8787/` explains the UI is on :5173 (localhost guard applies) | PASS |
-| Logging into / sending prompts to real ChatGPT, Claude, Gemini, Grok | **NOT RUN** (intentionally manual; not automatable by policy) |
-| Real phone hardware (iOS Safari / Android Chrome) | **NOT RUN** (emulated 390×844 touch viewport in Chromium only) |
-| Owner's own workstation (macOS/Windows) fresh clone | **NOT RUN** here |
-
-## Optional reference quote (現在値を取得)
-- Default `QUOTE_PROVIDER=frankfurter` in `apps/api/wrangler.jsonc`: on button press only, the local Worker requests `https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY` (plain GET, no user data, 5 s timeout, response validated).
-- The value is the European Central Bank **daily reference rate**: not a live or tradeable price. The UI labels it with its date.
-- To disable all external quote requests, create `apps/api/.dev.vars` (gitignored) containing `QUOTE_PROVIDER=off` and restart (`make restart`). The button disappears.
-- The browser E2E uses `QUOTE_PROVIDER=synthetic` (a fixed SYNTHETIC value, no network).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Security
 
-Local development only. **No authentication.** The Worker binds to `127.0.0.1`, rejects non-loopback `Host` headers and cross-origin writes, requires `application/json` for writes and limits body size. Do **not** deploy this API publicly until authentication, access controls, backups and secret handling are in place. There is intentionally no deployment script and no GitHub Actions workflow.
+TradeCourt is for **local use only** and has **no authentication**.
+- The API binds to `127.0.0.1` and rejects non-loopback `Host` headers and cross-origin writes.
+- Writes must be JSON, and request bodies are size-limited.
+- Do not deploy it publicly until authentication, access control and backups exist.
+- There is no deployment script and no CI workflow by design.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`AGENTS.md`](AGENTS.md).
+## Contributing
+
+Issues and pull requests are welcome.
+- Read [AGENTS.md](AGENTS.md) for the project boundaries: no AI API keys or browser automation, no order execution, no fabricated data.
+- Keep pull requests small, and run `make verify` before opening one.
+- Never commit secrets, real trading journals, CSV exports or local database state.
+
+## License
+
+[MIT](LICENSE). The software is provided "as is", without warranty of any kind. It is a decision-review tool, not financial advice; you are solely responsible for your trading decisions.
